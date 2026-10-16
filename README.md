@@ -79,6 +79,10 @@ Known limits:
 - The compiler WebAssembly is 28 MB, or 10.8 MB gzipped, so the first load is slow until a service worker caches it.
 - A LaTeX formula that is not valid yet, such as `\frac{1` while you type, stops the compile. The preview keeps the last good pages and shows the error until the formula is valid again.
 
-## Licences
+## Licence
+
+liveprint is released under the [MIT licence](LICENSE).
+
+### Bundled assets
 
 Bundled fonts and Typst packages are listed with their licences in [`public/fonts/LICENSES.md`](public/fonts/LICENSES.md) and [`public/packages/PROVENANCE.md`](public/packages/PROVENANCE.md).
