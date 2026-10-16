@@ -106,8 +106,14 @@ async function compilePdf(rev: Rev): Promise<void> {
 
 async function rasterNext(): Promise<boolean> {
   if (!shown || raster.final) return false;
-  await drawNext(shown, true);
-  return true;
+  try {
+    await drawNext(shown, true);
+    return true;
+  } catch (error) {
+    // Stop the background pass instead of retrying the same page forever; the next compile or view restarts it.
+    post({ kind: 'failed', rev: shown.rev, diagnostics: [errorText(error)] });
+    return false;
+  }
 }
 
 const mailbox = new Mailbox({ edit: compileEdit, view: (view) => raster.setView(view), pdf: compilePdf, raster: rasterNext, yieldToInbox });
