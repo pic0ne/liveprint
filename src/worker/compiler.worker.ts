@@ -4,7 +4,7 @@ import { convert } from '../convert/toTypst';
 import { fittedEdges } from '../linking/edges';
 import type { Bytes, FromWorker, LinkRequest, Rev, ToWorker } from '../protocol';
 import { createCompiler, FONT_FILES, MAIN_PATH, mainSource, PACKAGE_FILES } from '../typst/compiler';
-import prelude from '../typst/prelude.typ?raw';
+import { preludeFor } from '../typst/themes';
 import { measureFaces } from './advances';
 import { Linker } from './linker';
 import { type Edit, Mailbox } from './mailbox';
@@ -74,7 +74,7 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const t0 = performance.now();
   const { typst, pieces } = convert(markdown);
   const t1 = performance.now();
-  compiler.addSource(MAIN_PATH, mainSource(prelude, typst));
+  compiler.addSource(MAIN_PATH, mainSource(preludeFor({ paper: 'a4', margins: 'normal', theme: 'book' }), typst));
   try {
     const { result, diagnostics = [] } = await compiler.compile({
       mainFilePath: MAIN_PATH,

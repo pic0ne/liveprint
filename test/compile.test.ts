@@ -1,8 +1,11 @@
 import type { TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import { beforeAll, describe, expect, test } from 'vitest';
-import { nodeCompiler, prelude, repoText } from '../bench/typst-node';
+import { nodeCompiler, repoText } from '../bench/typst-node';
 import { convert } from '../src/convert/toTypst';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
+import { preludeFor } from '../src/typst/themes';
+
+const prelude = preludeFor({ paper: 'a4', margins: 'normal', theme: 'book' });
 
 let compiler: TypstCompiler;
 beforeAll(async () => {

@@ -2,7 +2,10 @@ import { cpus, loadavg } from 'node:os';
 import { CompileFormatEnum, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import { convert } from '../src/convert/toTypst';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
-import { nodeCompiler, prelude, repoText } from './typst-node';
+import { preludeFor } from '../src/typst/themes';
+import { nodeCompiler, repoText } from './typst-node';
+
+const prelude = preludeFor({ paper: 'a4', margins: 'normal', theme: 'book' });
 
 const EDITS = 30;
 const sample = repoText('src/sample.md');

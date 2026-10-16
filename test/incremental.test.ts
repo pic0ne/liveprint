@@ -3,9 +3,12 @@ import { createRequire } from 'node:module';
 import type { IncrementalServer, TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import { createTypstRenderer, type TypstRenderer } from '@myriaddreamin/typst.ts/renderer';
 import { beforeAll, expect, test } from 'vitest';
-import { nodeCompiler, prelude, repoText } from '../bench/typst-node';
+import { nodeCompiler, repoText } from '../bench/typst-node';
 import { convert } from '../src/convert/toTypst';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
+import { preludeFor } from '../src/typst/themes';
+
+const prelude = preludeFor({ paper: 'a4', margins: 'normal', theme: 'book' });
 
 let compiler: TypstCompiler;
 let renderer: TypstRenderer;
@@ -45,7 +48,7 @@ test('vector deltas, merged in order across a failed compile, hold the same page
       });
       expect(patched).toContain('patience');
       expect(patched).toBe(fresh);
-      expect(session.retrievePagesInfo()).toHaveLength(6);
+      expect(session.retrievePagesInfo()).toHaveLength(7);
     });
   });
 });
