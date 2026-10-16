@@ -4,7 +4,7 @@
 #set par(justify: false, leading: 0.78em, spacing: 1.15em)
 #set page(footer: context align(right, text(size: 0.85em, fill: luma(110), [#counter(page).display() / #counter(page).final().first()])))
 
-#show heading: set text(weight: "semibold")
+#show heading: set text(font: ("IBM Plex Sans SmBld", "IBM Plex Sans"), weight: "semibold")
 #show heading: set block(above: 1.9em, below: 0.85em)
 #show heading.where(level: 1): set text(size: 1.9em, tracking: -0.02em)
 #show heading.where(level: 1): set par(leading: 0.3em)
@@ -21,6 +21,6 @@
 
 #set table(stroke: none, inset: (x: 8pt, y: 5pt), fill: (_, y) => if y == 0 { luma(234) })
 #set table.hline(stroke: none)
-#show table.cell.where(y: 0): set text(weight: "semibold")
+#show table.cell.where(y: 0): set text(font: ("IBM Plex Sans SmBld", "IBM Plex Sans"), weight: "semibold")
 #set list(indent: 0.2em, body-indent: 0.7em)
 #set enum(indent: 0.2em, body-indent: 0.7em)
