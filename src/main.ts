@@ -1,6 +1,5 @@
 import { createEditor } from './editor';
 import { afterNextPaint, LatencyMeter } from './metrics';
-import { Preview } from './preview/preview';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
 import sample from './sample.md?raw';
 
@@ -60,7 +59,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 const meter = new LatencyMeter();
-const last = { bootMs: NaN, convertMs: NaN, compileMs: NaN, renderMs: NaN, pages: 0, failure: '' };
+const last = { bootMs: NaN, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, failure: '' };
 const ms = (n: number) => (Number.isNaN(n) ? '–' : n.toFixed(1));
 
 /** Timings only while toggled on; the first diagnostic of a failed compile always shows. */
@@ -69,7 +68,7 @@ function drawOverlay(): void {
   const stats = statsVisible
     ? [
         `keystroke → preview  ${ms(s.last)}  p50 ${ms(s.p50)}  p95 ${ms(s.p95)} ms  (${s.count})`,
-        `convert ${ms(last.convertMs)}  compile ${ms(last.compileMs)}  render ${ms(last.renderMs)} ms`,
+        `convert ${ms(last.convertMs)}  compile ${ms(last.compileMs)}  raster ${ms(last.rasterMs)} ms (${last.redrawn} redrawn)`,
         `${last.pages} ${last.pages === 1 ? 'page' : 'pages'}, compiler ready in ${ms(last.bootMs)} ms`,
       ]
     : [];
@@ -82,7 +81,6 @@ drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
 const send = (message: ToWorker) => worker.postMessage(message);
-const previewReady = Preview.create($('pages'));
 
 let rev: Rev = firstRev;
 let pdfRequest: Rev | null = null;
@@ -117,21 +115,19 @@ $('download-pdf').addEventListener('click', () => {
   send({ kind: 'pdf', rev });
 });
 
-worker.onmessage = async ({ data }: MessageEvent<FromWorker>) => {
+worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
   switch (data.kind) {
     case 'ready':
       last.bootMs = data.bootMs;
       drawOverlay();
       break;
-    case 'frame': {
-      const preview = await previewReady;
-      const t0 = performance.now();
-      preview.apply(data.delta);
+    case 'pages': {
       Object.assign(last, {
         convertMs: data.convertMs,
         compileMs: data.compileMs,
-        renderMs: performance.now() - t0,
-        pages: preview.pageCount,
+        rasterMs: data.rasterMs,
+        redrawn: data.bitmaps.length,
+        pages: data.sizes.length,
         failure: '',
       });
       afterNextPaint(() => {

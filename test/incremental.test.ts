@@ -18,7 +18,7 @@ beforeAll(async () => {
 
 const sample = repoText('src/sample.md');
 
-test('vector deltas, merged in order across a failed compile, render the same SVG as a full compile', async () => {
+test('vector deltas, merged in order across a failed compile, hold the same pages as a full compile', async () => {
   await compiler.withIncrementalServer(async (server: IncrementalServer) => {
     const step = (markdown: string) => {
       compiler.addSource(MAIN_PATH, mainSource(prelude, toTypst(markdown)));

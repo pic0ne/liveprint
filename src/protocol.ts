@@ -7,12 +7,49 @@ export const nextRev = (rev: Rev) => (rev + 1) as Rev;
 /** Owns a whole, non-shared buffer, so it can be transferred. */
 export type Bytes = Uint8Array<ArrayBuffer>;
 
+/** Inclusive page indices. */
+export interface PageRange {
+  first: number;
+  last: number;
+}
+
+/** What the preview pane shows: page width in CSS pixels, the display's density, and the pages in sight. */
+export interface View {
+  widthPx: number;
+  dpr: number;
+  visible: PageRange;
+}
+
+/** A page bitmap's size in device pixels. */
+export interface PageSize {
+  width: number;
+  height: number;
+}
+
+export interface PageBitmap {
+  index: number;
+  bitmap: ImageBitmap;
+}
+
 export type ToWorker =
   | { kind: 'edit'; rev: Rev; markdown: string }
-  | { kind: 'pdf'; rev: Rev };
+  | { kind: 'pdf'; rev: Rev }
+  | ({ kind: 'view' } & View);
 
 export type FromWorker =
   | { kind: 'ready'; bootMs: number }
-  | { kind: 'frame'; rev: Rev; delta: Bytes; convertMs: number; compileMs: number }
+  | {
+      kind: 'pages';
+      rev: Rev;
+      /** Every page, so the preview can reserve space for pages not drawn yet. */
+      sizes: PageSize[];
+      /** Only the pages redrawn since the last message. */
+      bitmaps: PageBitmap[];
+      /** False while dirty pages of this rev are still waiting to be drawn. */
+      final: boolean;
+      convertMs: number;
+      compileMs: number;
+      rasterMs: number;
+    }
   | { kind: 'failed'; rev: Rev; diagnostics: string[] }
   | { kind: 'pdf'; rev: Rev; bytes: Bytes };

@@ -133,49 +133,20 @@ button:focus-visible,
 }
 
 .pages {
+  position: relative;
   height: 100%;
   overflow-y: auto;
   padding: 24px;
 }
 
-.pages svg {
+.pages canvas {
   display: block;
   width: 100%;
-  height: auto;
-  fill: none;
+  background: #fff;
 }
 
-.pages .page-sheet {
-  fill: #fff;
-}
-
-/* typst.ts ships these with full renders only; the diff path needs them from the page. */
-.pages .typst-text {
-  pointer-events: bounding-box;
-}
-
-.pages .outline_glyph path,
-.pages path.outline_glyph {
-  fill: var(--glyph_fill);
-  stroke: var(--glyph_stroke);
-}
-
-.pages .tsel,
-.pages .tsel span {
-  position: fixed;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  white-space: pre;
-  text-align: justify;
-  text-align-last: justify;
-  color: transparent;
-}
-
-.pages .tsel::selection,
-.pages .tsel span::selection {
-  color: transparent;
-  background: var(--selection);
+.pages canvas + canvas {
+  margin-top: 14px;
 }
 
 .overlay {

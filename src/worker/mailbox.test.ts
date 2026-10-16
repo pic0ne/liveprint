@@ -4,6 +4,7 @@ import { Mailbox } from './mailbox';
 
 const edit = (rev: number) => ({ kind: 'edit', rev: rev as Rev, markdown: `v${rev}` }) as const;
 const pdf = (rev: number) => ({ kind: 'pdf', rev: rev as Rev }) as const;
+const view = (widthPx: number) => ({ kind: 'view', widthPx, dpr: 1, visible: { first: 0, last: 0 } }) as const;
 
 /** A mailbox whose compiles finish only when the test says so. */
 function harness() {
@@ -16,6 +17,7 @@ function harness() {
     });
   const mailbox = new Mailbox({
     edit: (e) => job(`edit ${e.rev}`)(),
+    view: (v) => log.push(`view ${v.widthPx}`),
     pdf: (rev) => job(`pdf ${rev}`)(),
     yieldToInbox: () => Promise.resolve(),
   });
@@ -62,4 +64,18 @@ test('a PDF request waits for the pending edit so it prints the newest text', as
   await finishCurrent();
   await finishCurrent();
   expect(log).toEqual(['edit 1', 'edit 2', 'pdf 1']);
+});
+
+test('views coalesce to the newest and apply before the job they arrived ahead of', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.receive(view(300));
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  mailbox.receive(view(400));
+  mailbox.receive(view(500));
+  mailbox.receive(edit(2));
+  await finishCurrent();
+  await finishCurrent();
+  expect(log).toEqual(['view 300', 'edit 1', 'view 500', 'edit 2']);
 });

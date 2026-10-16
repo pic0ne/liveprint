@@ -5,6 +5,7 @@ import type { Bytes, FromWorker, Rev, ToWorker } from '../protocol';
 import { createCompiler, FONT_FILES, MAIN_PATH, mainSource, PACKAGE_FILES } from '../typst/compiler';
 import prelude from '../typst/prelude.typ?raw';
 import { type Edit, Mailbox } from './mailbox';
+import { PageRaster } from './raster';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -48,6 +49,7 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 
 let compiler: TypstCompiler;
 let server: IncrementalServer;
+let raster: PageRaster;
 
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const t0 = performance.now();
@@ -61,8 +63,15 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
       diagnostics: 'unix',
     });
     const t2 = performance.now();
-    if (result) post({ kind: 'frame', rev, delta: owned(result), convertMs: t1 - t0, compileMs: t2 - t1 }, [result.buffer]);
-    else post({ kind: 'failed', rev, diagnostics });
+    if (!result) {
+      post({ kind: 'failed', rev, diagnostics });
+      return;
+    }
+    raster.merge(result);
+    const bitmaps = [];
+    while (!raster.final) bitmaps.push(...(await raster.draw()).bitmaps);
+    const message = { rev, sizes: raster.sizes, bitmaps, final: true, convertMs: t1 - t0, compileMs: t2 - t1 };
+    post({ kind: 'pages', ...message, rasterMs: performance.now() - t2 }, bitmaps.map((b) => b.bitmap));
   } catch (error) {
     post({ kind: 'failed', rev, diagnostics: [errorText(error)] });
   }
@@ -82,7 +91,7 @@ async function compilePdf(rev: Rev): Promise<void> {
   }
 }
 
-const mailbox = new Mailbox({ edit: compileEdit, pdf: compilePdf, yieldToInbox });
+const mailbox = new Mailbox({ edit: compileEdit, view: (view) => raster.setView(view), pdf: compilePdf, yieldToInbox });
 self.onmessage = (event: MessageEvent<ToWorker>) => mailbox.receive(event.data);
 
 async function boot(): Promise<void> {
@@ -90,7 +99,7 @@ async function boot(): Promise<void> {
     Promise.all(FONT_FILES.map(fetchBytes)),
     Promise.all(Object.entries(PACKAGE_FILES).map(async ([spec, path]) => [spec, await fetchTarball(path)] as const)),
   ]);
-  compiler = await createCompiler({ wasm: compilerWasm, fonts, packages: new Map(packages) });
+  [compiler, raster] = await Promise.all([createCompiler({ wasm: compilerWasm, fonts, packages: new Map(packages) }), PageRaster.create()]);
   server = await openIncrementalServer(compiler);
   post({ kind: 'ready', bootMs: performance.now() });
   mailbox.booted();
