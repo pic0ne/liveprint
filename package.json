@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "bench": "tsx bench/compile.ts",
+    "record:demo": "vite build --logLevel error && node bench/record-demo.mjs",
     "bench:browser": "vite build --logLevel error && node bench/browser.mjs",
     "check:linking": "vite build --logLevel error && node bench/check-linking.mjs"
   },

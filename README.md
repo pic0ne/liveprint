@@ -1,5 +1,7 @@
 # liveprint
 
+![Typing in liveprint: the typeset pages update on each keystroke with the latency overlay showing about 40 ms, then a click on a heading in the preview moves the editor cursor there, and the arrow keys move a highlight through the preview](docs/demo.gif)
+
 Write Markdown on the left and see the real PDF pages on the right while you type. The preview is the typeset document itself, not an HTML approximation: Typst compiles it in your browser, and **Download .pdf** gives you the same pages you see.
 
 Everything runs on the client. There is no server.
@@ -87,6 +89,7 @@ Other scripts:
 - `npm run bench` compares compile cost of cmarker and the JavaScript converter in Node.
 - `npm run bench:browser` measures keystroke latency in headless Chrome.
 - `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome.
+- `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
 ## Status
 
