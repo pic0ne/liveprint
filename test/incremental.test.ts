@@ -4,7 +4,7 @@ import type { IncrementalServer, TypstCompiler } from '@myriaddreamin/typst.ts/c
 import { createTypstRenderer, type TypstRenderer } from '@myriaddreamin/typst.ts/renderer';
 import { beforeAll, expect, test } from 'vitest';
 import { nodeCompiler, prelude, repoText } from '../bench/typst-node';
-import { toTypst } from '../src/convert/toTypst';
+import { convert } from '../src/convert/toTypst';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
 
 let compiler: TypstCompiler;
@@ -21,7 +21,7 @@ const sample = repoText('src/sample.md');
 test('vector deltas, merged in order across a failed compile, hold the same pages as a full compile', async () => {
   await compiler.withIncrementalServer(async (server: IncrementalServer) => {
     const step = (markdown: string) => {
-      compiler.addSource(MAIN_PATH, mainSource(prelude, toTypst(markdown)));
+      compiler.addSource(MAIN_PATH, mainSource(prelude, convert(markdown).typst));
       return compiler.compile({ mainFilePath: MAIN_PATH, incrementalServer: server, diagnostics: 'unix' });
     };
     await renderer.runWithSession(async (session) => {

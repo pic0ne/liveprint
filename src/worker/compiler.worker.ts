@@ -1,6 +1,6 @@
 import { CompileFormatEnum, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
-import { toTypst } from '../convert/toTypst';
+import { convert } from '../convert/toTypst';
 import type { Bytes, FromWorker, Rev, ToWorker } from '../protocol';
 import { createCompiler, FONT_FILES, MAIN_PATH, mainSource, PACKAGE_FILES } from '../typst/compiler';
 import prelude from '../typst/prelude.typ?raw';
@@ -68,7 +68,7 @@ async function drawNext(compiled: Compiled, background: boolean): Promise<void> 
 
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const t0 = performance.now();
-  const body = toTypst(markdown);
+  const body = convert(markdown).typst;
   const t1 = performance.now();
   compiler.addSource(MAIN_PATH, mainSource(prelude, body));
   try {

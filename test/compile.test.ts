@@ -1,7 +1,7 @@
 import type { TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { nodeCompiler, prelude, repoText } from '../bench/typst-node';
-import { toTypst } from '../src/convert/toTypst';
+import { convert } from '../src/convert/toTypst';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
 
 let compiler: TypstCompiler;
@@ -10,7 +10,7 @@ beforeAll(async () => {
 });
 
 async function errorsFor(markdown: string): Promise<string[]> {
-  compiler.addSource(MAIN_PATH, mainSource(prelude, toTypst(markdown)));
+  compiler.addSource(MAIN_PATH, mainSource(prelude, convert(markdown).typst));
   const { result, diagnostics = [] } = await compiler.compile({ mainFilePath: MAIN_PATH, diagnostics: 'unix' });
   const errors = diagnostics.filter((d) => /\berror\b/.test(d));
   return result ? errors : ['no artifact', ...errors];
@@ -35,7 +35,7 @@ const adversarial: Record<string, string> = {
   'the sample document': repoText('src/sample.md'),
 };
 
-describe('toTypst output compiles without errors', () => {
+describe('convert output compiles without errors', () => {
   test.each(Object.entries(adversarial))('%s', async (_, markdown) => {
     expect(await errorsFor(markdown)).toEqual([]);
   });

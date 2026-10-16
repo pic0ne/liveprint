@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { toTypst } from './toTypst';
+import sample from '../sample.md?raw';
+import { convert, type TextPiece } from './toTypst';
 
 const cases: [string, string, string][] = [
   ['ATX and setext headings', '# Title #\n\nSetext\n---', '#heading(level: 1)[Title]\n\n#heading(level: 2)[Setext]'],
@@ -56,8 +57,42 @@ const cases: [string, string, string][] = [
   ['empty input', '', ''],
 ];
 
-describe('toTypst', () => {
+describe('convert: Typst source', () => {
   test.each(cases)('%s', (_, markdown, typst) => {
-    expect(toTypst(markdown)).toBe(`${typst}\n`);
+    expect(convert(markdown).typst).toBe(`${typst}\n`);
   });
+});
+
+const pieceCases: [string, string, TextPiece[]][] = [
+  ['escapes show the escaped character at its own offset', 'a \\*b\\* c', [
+    { from: 0, text: 'a ' }, { from: 3, text: '*' }, { from: 4, text: 'b' }, { from: 6, text: '*' }, { from: 7, text: ' c' },
+  ]],
+  ['an entity is one piece at its start', '&amp; &#65; &bogus;', [
+    { from: 0, text: '&' }, { from: 5, text: ' ' }, { from: 6, text: 'A' }, { from: 11, text: ' ' }, { from: 12, text: '&bogus;' },
+  ]],
+  ['inline code, with the padding spaces left out', 'x `y z` w ``  a `` e', [
+    { from: 0, text: 'x ' }, { from: 3, text: 'y z' }, { from: 7, text: ' w ' }, { from: 13, text: ' a' }, { from: 18, text: ' e' },
+  ]],
+  ['fenced and indented code', '```js\nlet a\n```\n\n    b', [{ from: 6, text: 'let a' }, { from: 21, text: 'b' }]],
+  ['link text yes, URL no; autolinks show their URL', '[te*x*t](http://u) <http://v>', [
+    { from: 1, text: 'te' }, { from: 4, text: 'x' }, { from: 6, text: 't' }, { from: 18, text: ' ' }, { from: 20, text: 'http://v' },
+  ]],
+  ['an unresolved reference shows as typed', '[Nope]', [{ from: 0, text: '[Nope]' }]],
+  ['math and list markers show nothing', '- [x] a $x^2$ b\n1. c', [
+    { from: 5, text: ' a ' }, { from: 13, text: ' b' }, { from: 19, text: 'c' },
+  ]],
+  ['heading markers and emphasis marks show nothing', '## T *e*', [{ from: 2, text: ' T ' }, { from: 6, text: 'e' }]],
+];
+
+describe('convert: text pieces', () => {
+  test.each(pieceCases)('%s', (_, markdown, pieces) => {
+    expect(convert(markdown).pieces).toEqual(pieces);
+  });
+});
+
+test('the sample\'s pieces run forward through the Markdown and copy it', () => {
+  const { pieces } = convert(sample);
+  const out = pieces.filter((p, i) => sample.slice(p.from, p.from + p.text.length) !== p.text || (i > 0 && p.from < pieces[i - 1]!.from + pieces[i - 1]!.text.length));
+  expect(pieces.length).toBeGreaterThan(200);
+  expect(out).toEqual([]);
 });

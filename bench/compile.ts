@@ -1,6 +1,6 @@
 import { cpus, loadavg } from 'node:os';
 import { CompileFormatEnum, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
-import { toTypst } from '../src/convert/toTypst';
+import { convert } from '../src/convert/toTypst';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
 import { nodeCompiler, prelude, repoText } from './typst-node';
 
@@ -64,23 +64,23 @@ for (const where of ['start', 'end'] as const) {
   compiler.unmapShadow('/doc.md');
 
   await compiler.withIncrementalServer(async (server) => {
-    compiler.addSource(MAIN_PATH, mainSource(prelude, toTypst(sample)));
+    compiler.addSource(MAIN_PATH, mainSource(prelude, convert(sample).typst));
     await compileLogged(compiler, { mainFilePath: MAIN_PATH, incrementalServer: server });
-    const bodies = Array.from({ length: EDITS }, (_, i) => toTypst(edited(where, i)));
-    await measure(`B toTypst, incremental delta (${where})`, (i) => {
+    const bodies = Array.from({ length: EDITS }, (_, i) => convert(edited(where, i)).typst);
+    await measure(`B convert, incremental delta (${where})`, (i) => {
       compiler.addSource(MAIN_PATH, mainSource(prelude, bodies[i]!));
       return compileLogged(compiler, { mainFilePath: MAIN_PATH, incrementalServer: server });
     });
   });
 
-  const pdfBodies = Array.from({ length: EDITS }, (_, i) => toTypst(edited(where, i)));
-  await measure(`B toTypst, PDF (${where})`, (i) => {
+  const pdfBodies = Array.from({ length: EDITS }, (_, i) => convert(edited(where, i)).typst);
+  await measure(`B convert, PDF (${where})`, (i) => {
     compiler.addSource(MAIN_PATH, mainSource(prelude, pdfBodies[i]!));
     return compileLogged(compiler, { mainFilePath: MAIN_PATH, format: CompileFormatEnum.pdf });
   });
 
-  for (let i = 0; i < 5; i++) toTypst(edited(where, i));
-  await measure(`toTypst alone (${where})`, async (i) => encoder.encode(toTypst(edited(where, i))));
+  for (let i = 0; i < 5; i++) convert(edited(where, i)).typst;
+  await measure(`convert alone (${where})`, async (i) => encoder.encode(convert(edited(where, i)).typst));
 }
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1] ?? NaN;

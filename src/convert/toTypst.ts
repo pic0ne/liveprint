@@ -2,9 +2,22 @@ import { markdownParser } from '../markdown/parser';
 
 type SyntaxNode = ReturnType<typeof markdownParser.parse>['topNode'];
 
+/** `text[i]` renders the Markdown character at offset `from + i`. */
+export interface TextPiece {
+  from: number;
+  text: string;
+}
+
+export interface Converted {
+  typst: string;
+  /** The Markdown text the Typst source shows, in document order. Generated text (bullets, numbers) and math have none. */
+  pieces: TextPiece[];
+}
+
 interface Doc {
   src: string;
   refs: ReadonlyMap<string, string>;
+  pieces: TextPiece[];
 }
 
 type Emit = (node: SyntaxNode, doc: Doc) => string;
@@ -27,6 +40,13 @@ function str(text: string): string {
 const STRING_ESCAPES: Record<string, string> = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' };
 
 const slice = (node: SyntaxNode, doc: Doc) => doc.src.slice(node.from, node.to);
+
+/** Shows `text` as typed at `from`, so its characters link back to the Markdown. */
+function shown(doc: Doc, from: number, text: string): string {
+  if (text !== '') doc.pieces.push({ from, text });
+  return text;
+}
+const verbatim = (doc: Doc, from: number, to: number) => shown(doc, from, doc.src.slice(from, to));
 const childrenOf = (node: SyntaxNode): SyntaxNode[] => {
   const out: SyntaxNode[] = [];
   for (let c = node.firstChild; c; c = c.nextSibling) out.push(c);
@@ -38,7 +58,7 @@ function inline(node: SyntaxNode, doc: Doc, from = node.from, to = node.to): str
   let out = '';
   let pos = from;
   const text = (end: number) => {
-    if (end > pos) out += escapeText(doc.src.slice(pos, end));
+    if (end > pos) out += escapeText(verbatim(doc, pos, end));
   };
   for (const child of childrenOf(node)) {
     if (child.to <= from || child.from >= to) continue;
@@ -66,6 +86,11 @@ function joinChildren(node: SyntaxNode, doc: Doc, part: string): string {
     .map((c) => slice(c, doc))
     .join('');
 }
+
+const shownChildren = (node: SyntaxNode, doc: Doc, part: string) =>
+  named(node, part)
+    .map((c) => verbatim(doc, c.from, c.to))
+    .join('');
 
 function inlineBetweenMarks(node: SyntaxNode, doc: Doc): string {
   const [open, close] = named(node, 'LinkMark');
@@ -146,10 +171,11 @@ function table(node: SyntaxNode, doc: Doc): string {
       return s.endsWith(':') ? (s.startsWith(':') ? 'center' : 'right') : 'left';
     });
   const columns = aligns.length;
+  const head = tableRow(header, doc, columns).join(', ');
   const rows = named(node, 'TableRow').map((r) => tableRow(r, doc, columns).join(', '));
   return [
     `#table(columns: ${columns}, align: (${aligns.join(', ')},),`,
-    `  table.hline(), table.header(${tableRow(header, doc, columns).join(', ')}), table.hline(),`,
+    `  table.hline(), table.header(${head}), table.hline(),`,
     ...rows.map((r) => `  ${r},`),
     `  table.hline(),`,
     `)`,
@@ -168,9 +194,9 @@ function entity(raw: string): string {
   return ENTITIES[body] ?? raw;
 }
 
-const textBlock = (text: string) => defuseLineStart(escapeText(text.trim()));
+const textBlock = (doc: Doc, from: number, to: number) => defuseLineStart(escapeText(verbatim(doc, from, to).trim()));
 
-const paragraphFallback: Emit = (node, doc) => textBlock(slice(node, doc));
+const paragraphFallback: Emit = (node, doc) => textBlock(doc, node.from, node.to);
 
 const drop: Emit = () => '';
 
@@ -196,19 +222,19 @@ const EMITTERS: Record<string, Emit> = {
   FencedCode: (node, doc) => {
     const info = node.getChild('CodeInfo');
     const lang = info ? slice(info, doc).split(/\s/)[0]! : '';
-    return `#raw(${str(joinChildren(node, doc, 'CodeText'))}, block: true${lang ? `, lang: ${str(lang)}` : ''})`;
+    return `#raw(${str(shownChildren(node, doc, 'CodeText'))}, block: true${lang ? `, lang: ${str(lang)}` : ''})`;
   },
-  CodeBlock: (node, doc) => `#raw(${str(joinChildren(node, doc, 'CodeText').replace(/\n+$/, ''))}, block: true)`,
+  CodeBlock: (node, doc) => `#raw(${str(shownChildren(node, doc, 'CodeText').replace(/\n+$/, ''))}, block: true)`,
   HorizontalRule: () => '#line(length: 100%)',
   Table: table,
   BlockMath: (node, doc) => {
     const tex = joinChildren(node, doc, 'MathText');
     const closed = named(node, 'MathMark').length === 2;
-    return closed ? `#mitex(${str(tex.trim())})` : `#raw(${str(`$$${tex}`)}, block: true)`;
+    return closed ? `#mitex(${str(tex.trim())})` : `#raw(${str(`$$${shownChildren(node, doc, 'MathText')}`)}, block: true)`;
   },
   HTMLBlock: paragraphFallback,
   LinkReference: drop,
-  CommentBlock: (node, doc) => textBlock(slice(node, doc).replace(/^[^]*-->/, '')),
+  CommentBlock: (node, doc) => textBlock(doc, node.from + (/^[^]*-->/.exec(slice(node, doc))?.[0].length ?? 0), node.to),
   ProcessingInstructionBlock: drop,
 
   Emphasis: (node, doc) => `#emph[${inline(node, doc)}];`,
@@ -216,32 +242,32 @@ const EMITTERS: Record<string, Emit> = {
   Strikethrough: (node, doc) => `#strike[${inline(node, doc)}];`,
   InlineCode: (node, doc) => {
     const [open, close] = named(node, 'CodeMark');
-    let code = doc.src.slice(open?.to ?? node.from, close?.from ?? node.to).replace(/\n/g, ' ');
-    if (/^ .*[^ ].* $/.test(code)) code = code.slice(1, -1);
-    return `#raw(${str(code)});`;
+    let from = open?.to ?? node.from;
+    let to = close?.from ?? node.to;
+    if (/^ .*[^ ].* $/.test(doc.src.slice(from, to).replace(/\n/g, ' '))) [from, to] = [from + 1, to - 1];
+    return `#raw(${str(verbatim(doc, from, to).replace(/\n/g, ' '))});`;
   },
   InlineMath: (node, doc) => {
     const display = (node.getChild('MathMark')?.to ?? 0) - node.from === 2;
     return `#${display ? 'mitex' : 'mi'}(${str(joinChildren(node, doc, 'MathText'))});`;
   },
   Link: (node, doc) => {
-    const body = inlineBetweenMarks(node, doc);
     const url = node.getChild('URL');
-    if (url) return link(slice(url, doc), body);
+    if (url) return link(slice(url, doc), inlineBetweenMarks(node, doc));
     const label = node.getChild('LinkLabel');
     const target = doc.refs.get(normalizeLabel(label ? slice(label, doc) : `[${doc.src.slice(node.from + 1, node.to - 1)}]`));
-    return target === undefined ? escapeText(slice(node, doc)) : link(target, body);
+    return target === undefined ? escapeText(verbatim(doc, node.from, node.to)) : link(target, inlineBetweenMarks(node, doc));
   },
   Image: inlineBetweenMarks,
-  URL: (node, doc) => link(slice(node, doc), escapeText(slice(node, doc))),
+  URL: (node, doc) => link(slice(node, doc), escapeText(verbatim(doc, node.from, node.to))),
   Autolink: (node, doc) => {
     const url = node.getChild('URL');
-    return url ? emit(url, doc) : escapeText(slice(node, doc));
+    return url ? emit(url, doc) : escapeText(verbatim(doc, node.from, node.to));
   },
   HardBreak: () => '#linebreak();',
-  Escape: (node, doc) => escapeText(slice(node, doc).slice(1)),
-  Entity: (node, doc) => escapeText(entity(slice(node, doc))),
-  HTMLTag: (node, doc) => escapeText(slice(node, doc)),
+  Escape: (node, doc) => escapeText(verbatim(doc, node.from + 1, node.to)),
+  Entity: (node, doc) => escapeText(shown(doc, node.from, entity(slice(node, doc)))),
+  HTMLTag: (node, doc) => escapeText(verbatim(doc, node.from, node.to)),
   Comment: drop,
   ProcessingInstruction: drop,
 };
@@ -268,9 +294,13 @@ function collectRefs(root: SyntaxNode, src: string): Map<string, string> {
   return refs;
 }
 
-/** Markdown to the Typst document body. Pure and total: every input yields Typst that parses. */
-export function toTypst(markdown: string): string {
+/**
+ * Markdown to the Typst document body, and the Markdown text it shows. Pure and total: every input yields Typst
+ * that parses. Piece offsets count in the text after `\r\n` became `\n`; the editor's text never has `\r`.
+ */
+export function convert(markdown: string): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  return `${emit(root, { src, refs: collectRefs(root, src) })}\n`;
+  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [] };
+  return { typst: `${emit(root, doc)}\n`, pieces: doc.pieces };
 }
