@@ -4,8 +4,24 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>liveprint</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <header class="bar">
+      <span class="wordmark">liveprint</span>
+      <div class="actions">
+        <button type="button" id="download-md">Download .md</button>
+        <button type="button" id="download-pdf">Download .pdf</button>
+      </div>
+    </header>
+    <main class="split" id="split">
+      <section class="editor" id="editor" aria-label="Markdown"></section>
+      <div class="divider" id="divider" role="separator" aria-orientation="vertical" aria-label="Resize panes" tabindex="0"></div>
+      <section class="preview" aria-label="Preview">
+        <div class="pages" id="pages"></div>
+        <div class="overlay" id="overlay" hidden></div>
+      </section>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
