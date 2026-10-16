@@ -3,21 +3,6 @@ import { MemoryAccessModel } from '@myriaddreamin/typst.ts/fs/memory';
 import { loadFonts, withAccessModel, withPackageRegistry } from '@myriaddreamin/typst.ts/options.init';
 import type { WebAssemblyModuleRef } from '@myriaddreamin/typst.ts/wasm';
 
-export const FONT_FILES = [
-  'fonts/LibertinusSerif-Regular.otf',
-  'fonts/LibertinusSerif-Bold.otf',
-  'fonts/LibertinusSerif-Italic.otf',
-  'fonts/LibertinusSerif-BoldItalic.otf',
-  'fonts/NewCMMath-Regular.otf',
-  'fonts/DejaVuSansMono.ttf',
-  'fonts/DejaVuSansMono-Bold.ttf',
-  'fonts/DejaVuSansMono-Oblique.ttf',
-] as const;
-
-export const PACKAGE_FILES: Record<string, string> = {
-  'mitex:0.2.6': 'packages/mitex-0.2.6.tar.gz',
-};
-
 export const MAIN_PATH = '/main.typ';
 
 export interface CompilerAssets {

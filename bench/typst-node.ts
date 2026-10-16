@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createCompiler, FONT_FILES, PACKAGE_FILES } from '../src/typst/compiler';
+import { createCompiler } from '../src/typst/compiler';
+import { FONT_FILES, PACKAGE_FILES } from '../src/typst/files';
 import { THEMES } from '../src/typst/themes';
 
 const root = new URL('../', import.meta.url);
