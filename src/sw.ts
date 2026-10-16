@@ -34,7 +34,8 @@ self.addEventListener('activate', (event) => {
 
 async function cacheFirst(request: Request, keep: boolean): Promise<Response> {
   const cache = await caches.open(CACHE);
-  const hit = await cache.match(request);
+  // vite preview sends `Vary: Origin`, and module scripts ask with an Origin the install's requests had not.
+  const hit = await cache.match(request, { ignoreVary: true });
   if (hit) return hit;
   const response = await fetch(request);
   if (keep && response.ok) await cache.put(request, response.clone());
