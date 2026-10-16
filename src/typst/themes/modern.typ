@@ -1,0 +1,26 @@
+// Modern: IBM Plex Sans, ragged right, open spacing, tinted code and table header.
+#let accent = rgb("#0b5cad")
+#set text(font: "IBM Plex Sans", size: 10.5pt, lang: "en", hyphenate: false)
+#set par(justify: false, leading: 0.78em, spacing: 1.15em)
+#set page(footer: context align(right, text(size: 0.85em, fill: luma(110), [#counter(page).display() / #counter(page).final().first()])))
+
+#show heading: set text(weight: "semibold")
+#show heading: set block(above: 1.9em, below: 0.85em)
+#show heading.where(level: 1): set text(size: 1.9em, tracking: -0.02em)
+#show heading.where(level: 1): set par(leading: 0.3em)
+#show heading.where(level: 1): set block(above: 0em, below: 1em)
+#show heading.where(level: 2): set text(size: 1.4em, tracking: -0.01em)
+#show heading.where(level: 3): set text(size: 1.1em)
+#show heading.where(level: 4): set text(size: 1em, fill: luma(80))
+
+#show quote.where(block: true): it => block(stroke: (left: 2pt + accent), inset: (left: 12pt, y: 2pt), it.body)
+#show raw: set text(font: "IBM Plex Mono", size: 0.9em)
+#show raw.where(block: false): box.with(fill: luma(240), inset: (x: 2.5pt), outset: (y: 2.5pt))
+#show raw.where(block: true): set block(fill: luma(244), inset: 11pt, width: 100%)
+#show link: set text(fill: accent)
+
+#set table(stroke: none, inset: (x: 8pt, y: 5pt), fill: (_, y) => if y == 0 { luma(234) })
+#set table.hline(stroke: none)
+#show table.cell.where(y: 0): set text(weight: "semibold")
+#set list(indent: 0.2em, body-indent: 0.7em)
+#set enum(indent: 0.2em, body-indent: 0.7em)
