@@ -15,22 +15,24 @@ const { values: args } = parseArgs({
 
 const { url, page, evaluate, stopServer, close } = await launch();
 /** Network events and throttling for a target: the page itself, or a worker it starts (no session id for the page). */
-async function watchNetwork(sessionId) {
-  await page.send('Network.enable', {}, sessionId);
-  if (!args.throttle) return;
+function watchNetwork(sessionId) {
+  const commands = [page.send('Network.enable', {}, sessionId)];
   const bytesPerSecond = (Number(args.throttle) * 1e6) / 8;
-  await page.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: bytesPerSecond, uploadThroughput: bytesPerSecond }, sessionId);
+  if (args.throttle) {
+    commands.push(page.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: bytesPerSecond, uploadThroughput: bytesPerSecond }, sessionId));
+  }
+  return Promise.all(commands);
 }
 
 await page.send('Page.enable');
 await watchNetwork();
-// The compile worker fetches the wasm, fonts and packages, so it is held at start until its network is watched too.
+// The compile worker fetches the wasm, fonts and packages, so it and the service worker are held at start until their network is watched too.
 await page.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
 page.listeners.add(async ({ method, params }) => {
   if (method !== 'Target.attachedToTarget') return;
   const { sessionId } = params;
-  await watchNetwork(sessionId).catch(() => {});
-  await page.send('Runtime.runIfWaitingForDebugger', {}, sessionId).catch(() => {});
+  // A paused service worker answers Network.enable only once it runs, so all three go out at once, in this order.
+  await Promise.all([watchNetwork(sessionId), page.send('Runtime.runIfWaitingForDebugger', {}, sessionId)]).catch(() => {});
 });
 await page.send('Page.addScriptToEvaluateOnNewDocument', {
   source: `window.__load = { firstPage: null, bootMs: null };
