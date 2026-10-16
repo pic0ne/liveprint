@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "bench": "tsx bench/compile.ts",
-    "bench:browser": "vite build --logLevel error && node bench/browser.mjs"
+    "bench:browser": "vite build --logLevel error && node bench/browser.mjs",
+    "check:linking": "vite build --logLevel error && node bench/check-linking.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
