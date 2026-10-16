@@ -20,6 +20,14 @@ export class Pages {
     scroller.addEventListener('scroll', () => this.#schedule(), { passive: true });
   }
 
+  /** The page under a click, and where on it in fractions of its width and height. */
+  pointAt(event: MouseEvent): { page: number; fx: number; fy: number } | null {
+    const page = this.#canvases.indexOf(event.target as HTMLCanvasElement);
+    if (page < 0) return null;
+    const box = this.#canvases[page]!.getBoundingClientRect();
+    return { page, fx: (event.clientX - box.left) / box.width, fy: (event.clientY - box.top) / box.height };
+  }
+
   show(sizes: PageSize[], bitmaps: PageBitmap[]): void {
     while (this.#canvases.length < sizes.length) {
       this.#canvases.push(this.#scroller.appendChild(document.createElement('canvas')));

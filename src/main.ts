@@ -1,4 +1,4 @@
-import { createEditor } from './editor';
+import { createEditor, jumpTo } from './editor';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
@@ -110,6 +110,16 @@ function download(name: string, blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(a.href));
 }
 
+// Ids for linking requests; only the newest click is acted on.
+let linkId = 0;
+let clicked = 0;
+$('pages').addEventListener('click', (e) => {
+  const point = pages.pointAt(e);
+  if (!point) return;
+  clicked = ++linkId;
+  send({ kind: 'source', id: clicked, ...point });
+});
+
 $('download-md').addEventListener('click', () => {
   download('document.md', new Blob([editor.state.doc.toString()], { type: 'text/markdown' }));
 });
@@ -151,6 +161,9 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       if (data.rev !== pdfRequest) break;
       pdfRequest = null;
       download('document.pdf', new Blob([data.bytes], { type: 'application/pdf' }));
+      break;
+    case 'sourced':
+      if (data.id === clicked && data.offset !== null) jumpTo(editor, data.offset);
       break;
   }
 };

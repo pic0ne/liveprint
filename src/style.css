@@ -19,6 +19,7 @@
   --button-hover: #cfccc4;
   --overlay: #f7f6f3;
   --failure: #9a3412;
+  --accent: #2563d0;
   color-scheme: light;
 }
 
@@ -38,6 +39,7 @@
     --button-hover: #403e3a;
     --overlay: #232220;
     --failure: #f0a07a;
+    --accent: #3b7be8;
     color-scheme: dark;
   }
 }
@@ -144,6 +146,7 @@ button:focus-visible,
   display: block;
   width: 100%;
   background: #fff;
+  cursor: text;
 }
 
 .pages canvas + canvas {
@@ -167,6 +170,41 @@ button:focus-visible,
 .overlay .failure {
   color: var(--failure);
   white-space: normal;
+}
+
+/* Two names for one fade, so marking the same line again restarts it. */
+.cm-line.lp-jumped-a {
+  animation: lp-jumped-a 600ms ease-out forwards;
+}
+
+.cm-line.lp-jumped-b {
+  animation: lp-jumped-b 600ms ease-out forwards;
+}
+
+@keyframes lp-jumped-a {
+  from {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@keyframes lp-jumped-b {
+  from {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-line.lp-jumped-a,
+  .cm-line.lp-jumped-b {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
 }
 
 @media (max-width: 720px) {
