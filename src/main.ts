@@ -1,5 +1,6 @@
 import { createEditor } from './editor';
 import { afterNextPaint, LatencyMeter } from './metrics';
+import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
 import sample from './sample.md?raw';
 
@@ -81,6 +82,7 @@ drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
 const send = (message: ToWorker) => worker.postMessage(message);
+const pages = new Pages($('pages'), (view) => send({ kind: 'view', ...view }));
 
 let rev: Rev = firstRev;
 let pdfRequest: Rev | null = null;
@@ -122,6 +124,7 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       drawOverlay();
       break;
     case 'pages': {
+      pages.show(data.sizes, data.bitmaps);
       Object.assign(last, {
         convertMs: data.convertMs,
         compileMs: data.compileMs,
