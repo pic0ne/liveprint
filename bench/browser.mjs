@@ -1,12 +1,21 @@
 // Keystroke-to-preview latency in headless Chrome against `vite preview` of dist/ (`npm run bench:browser` builds it).
-// node bench/browser.mjs [--keys 60] [--gap 150] [--check <dir>]
-// --check also screenshots into <dir> and counts visible pages without a bitmap after every key, which perturbs timing.
+// node bench/browser.mjs [--keys 60] [--gap 150] [--theme book] [--check <dir>] [--switch]
+// Pages are A4 with normal margins in --theme. --check also screenshots into <dir> and counts visible pages without
+// a bitmap after every key, which perturbs timing. --switch instead times choosing a theme until its first pages paint.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
 
-const { values: args } = parseArgs({ options: { keys: { type: 'string', default: '60' }, gap: { type: 'string', default: '150' }, check: { type: 'string' } } });
+const { values: args } = parseArgs({
+  options: {
+    keys: { type: 'string', default: '60' },
+    gap: { type: 'string', default: '150' },
+    theme: { type: 'string', default: 'book' },
+    check: { type: 'string' },
+    switch: { type: 'boolean', default: false },
+  },
+});
 const [KEYS, GAP] = [Number(args.keys), Number(args.gap)];
 
 const SPOTS = {
@@ -82,17 +91,26 @@ function mainThread(events) {
 
 await page.send('Page.enable');
 await page.send('Page.addScriptToEvaluateOnNewDocument', {
-  source: `window.__pages = { messages: 0, bitmaps: 0, located: 0 };
+  source: `localStorage.setItem('liveprint.page', ${JSON.stringify(JSON.stringify({ paper: 'a4', margins: 'normal', theme: args.theme }))});
+    window.__pages = { messages: 0, bitmaps: 0, located: 0 };
+    window.__shown = null;
     window.Worker = class extends Worker {
       constructor(...args) {
         super(...args);
+        window.__worker = this;
         this.addEventListener('message', ({ data }) => {
-          if (data.kind === 'pages') (__pages.messages++, (__pages.bitmaps += data.bitmaps.length));
+          if (data.kind === 'pages') (__pages.messages++, (__pages.bitmaps += data.bitmaps.length), (__shown = { ...data.settings, final: data.final }));
           if (data.kind === 'located') __pages.located++;
         });
       }
     };`,
 });
+if (args.switch) {
+  await timeSwitches();
+  await close();
+  process.exit(0);
+}
+
 for (const [label, spot] of Object.entries(SPOTS)) {
   await load(spot);
   await shot(`${label}-loaded`);
@@ -119,3 +137,46 @@ for (const [label, spot] of Object.entries(SPOTS)) {
 }
 await close();
 process.exit(0);
+
+/** From a click on a theme to the paint after the worker's first pages in it, which are the visible ones. */
+function choose(theme) {
+  return evaluate(`new Promise((resolve) => {
+    const t0 = performance.now();
+    const on = ({ data }) => {
+      if (data.kind !== 'pages' || data.settings.theme !== '${theme}') return;
+      __worker.removeEventListener('message', on);
+      requestAnimationFrame(() => setTimeout(() => resolve({ ms: performance.now() - t0, compileMs: data.compileMs, rasterMs: data.rasterMs })));
+    };
+    __worker.addEventListener('message', on);
+    document.querySelector('input[name=theme][value=${theme}]').click();
+  })`);
+}
+
+/** Cold is the first choice after a load with an empty HTTP cache; warm chooses it again after going back to the start theme. */
+async function timeSwitches(reps = 3) {
+  await page.send('Network.enable');
+  const settled = (theme) => until(`${theme} drawn`, () => evaluate(`__shown?.final && __shown.theme === '${theme}'`), 600);
+  const rows = [];
+  for (const theme of ['book', 'paper', 'modern'].filter((t) => t !== args.theme)) {
+    const times = { cold: [], warm: [] };
+    for (let i = 0; i < reps; i++) {
+      await page.send('Network.clearBrowserCache');
+      await page.send('Page.navigate', { url });
+      await settled(args.theme);
+      await sleep(500);
+      times.cold.push(await choose(theme));
+      await settled(theme);
+      await choose(args.theme);
+      await settled(args.theme);
+      await sleep(300);
+      times.warm.push(await choose(theme));
+      await settled(theme);
+    }
+    for (const [label, runs] of Object.entries(times)) {
+      const parts = runs.map((r) => `${r.ms.toFixed(0)} (compile ${r.compileMs.toFixed(0)}, raster ${r.rasterMs.toFixed(0)})`);
+      rows.push(`  ${args.theme} → ${theme}, ${label}: ${parts.join(', ')} ms`);
+    }
+  }
+  console.log(`\ntheme switch, click to first pages painted (${reps} runs each, fonts over loopback):`);
+  for (const row of rows) console.log(row);
+}

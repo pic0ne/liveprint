@@ -3,10 +3,14 @@
 // inside it; (b) a cursor inside the word puts the preview's caret mark inside the word as printed. A word's box is
 // found in the page's pixels, as the ink between the gaps that separate its run's words, so neither the source
 // index nor its character measuring decides what counts as correct.
+// node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
+import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
 
 const WORDS_PER_PAGE = 4;
 const DPR = 2;
+const { values: args } = parseArgs({ options: { theme: { type: 'string', default: 'book' } } });
+const settings = { paper: 'a4', margins: 'normal', theme: args.theme };
 
 const { url, page, evaluate, close } = await launch();
 await page.send('Page.enable');
@@ -14,6 +18,7 @@ await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900
 await page.send('Page.addScriptToEvaluateOnNewDocument', {
   source: `window.__located = 0;
     window.__sourced = [];
+    window.__shown = null;
     window.Worker = class extends Worker {
       constructor(...args) {
         super(...args);
@@ -22,6 +27,7 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
         this.addEventListener('message', ({ data }) => {
           if (data.kind === 'located') __located++;
           if (data.kind === 'sourced') __sourced.push(performance.now() - asked);
+          if (data.kind === 'pages') __shown = { ...data.settings, final: data.final };
         });
         const post = this.postMessage.bind(this);
         this.postMessage = (message) => {
@@ -33,6 +39,10 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
 });
 await page.send('Page.navigate', { url });
 await until('every page drawn', () => evaluate(`(() => { const c = [...document.querySelectorAll('#pages canvas')]; return c.length > 1 && c.every((x) => x.width > 0); })()`), 600);
+await evaluate(`__worker.postMessage(${JSON.stringify({ kind: 'settings', settings })})`);
+await until(`every page drawn in ${args.theme}`, () =>
+  evaluate(`__shown?.final && ${JSON.stringify(Object.entries(settings))}.every(([key, value]) => __shown[key] === value)`),
+);
 await sleep(1000);
 
 const ask = (message, reply) =>
@@ -98,6 +108,8 @@ function wordBoxes(text, { spans }) {
 const isWord = /[\p{L}\p{N}]/u;
 const occurrences = (text, word) => [...text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, 'gu'))].map((m) => m.index);
 const fences = [...markdown.matchAll(/^```[^\n]*\n[^]*?^```/gm)].map((m) => [m.index, m.index + m[0].length]);
+// Linking inside math is approximate by design, so a word printed from LaTeX, such as \exp, is not sampled.
+const maths = [...markdown.matchAll(/\$\$[^]*?\$\$|\$[^$\n]+\$/g)].map((m) => [m.index, m.index + m[0].length]);
 function kindAt(offset) {
   const lineStart = markdown.lastIndexOf('\n', offset - 1) + 1;
   const line = markdown.slice(lineStart, markdown.indexOf('\n', offset) >>> 0);
@@ -118,6 +130,7 @@ pages.forEach(({ height, runs }, p) =>
       if (text.length < 3 || !isWord.test(text) || /[^\p{L}\p{N}]/u.test(text)) continue;
       const inMarkdown = occurrences(markdown, text);
       if (inMarkdown.length !== 1 || occurrences(allText, text).length !== 1) continue;
+      if (maths.some(([from, to]) => inMarkdown[0] > from && inMarkdown[0] < to)) continue;
       candidates.push({ text, page: p, run, box: word.box, scale: ink[p][r].scale, from: inMarkdown[0], kind: kindAt(inMarkdown[0]), y: run.y / height });
     }
   }),
@@ -215,6 +228,7 @@ await close();
 const columns = ['word', 'page', 'kind', 'box', 'click', 'caret'];
 const width = Object.fromEntries(columns.map((c) => [c, Math.max(c.length, ...results.map((r) => String(r[c]).length))]));
 const row = (r) => columns.map((c) => String(r[c]).padEnd(width[c])).join('  ');
+console.log(`${args.theme}, A4, normal margins\n`);
 console.log(row(Object.fromEntries(columns.map((c) => [c, c]))));
 for (const r of results) console.log(row(r));
 const failed = results.filter((r) => r.click !== 'pass' || r.caret !== 'pass');
