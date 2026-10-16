@@ -8,14 +8,14 @@ Everything runs on the client. There is no server.
 
 ## Speed
 
-Keystroke to updated preview, measured on [`src/sample.md`](src/sample.md) (6 A4 pages, about 3,000 words, with tables, code and LaTeX math):
+Keystroke to updated preview, measured on [`src/sample.md`](src/sample.md) (7 A4 pages in the Book theme, about 3,000 words, with tables, code and LaTeX math):
 
 | Edit | p50 | p95 | Main-thread tasks over 16 ms |
 |---|---|---|---|
-| Typing inside a heading | 45.2 ms | 59.7 ms | 0 |
-| Adding paragraphs near the top, which reflows every later page | 24.9 ms | 65.3 ms | 0 |
+| Typing inside a heading | 41.3 ms | 53.1 ms | 0 |
+| Adding paragraphs near the top, which reflows every later page | 24.4 ms | 60.8 ms | 0 |
 
-Each row is 60 real keystrokes, 150 ms apart, sent to headless Chrome over the DevTools protocol. Chrome used software rendering (SwiftShader) for these runs, so a browser with GPU raster should do at least as well, but that is not measured yet. To reproduce the table, run:
+Each row is 60 real keystrokes, 150 ms apart, sent to headless Chrome over the DevTools protocol, and each value is the median of three runs. Chrome used software rendering (SwiftShader) for these runs, so a browser with GPU raster should do at least as well, but that is not measured yet. To reproduce the table, run:
 
 ```bash
 npm run bench:browser
@@ -73,7 +73,21 @@ To check both directions in headless Chrome, run:
 npm run check:linking
 ```
 
-It samples 28 words from all six pages, among them a table cell, a code token, a list item and a word right after inline math. It clicks each word in the preview and checks that the editor cursor lands inside it. Then it puts the cursor inside the word and checks that the bar in the preview lies inside the printed word. The printed word's box comes from the page's pixels, not from the text layer, so the check does not test the index against itself.
+It runs once for each theme. In each, it samples 28 to 36 words from every page, among them a table cell, a code token, a list item and a word right after inline math. It clicks each word in the preview and checks that the editor cursor lands inside it. Then it puts the cursor inside the word and checks that the bar in the preview lies inside the printed word. The printed word's box comes from the page's pixels, not from the text layer, so the check does not test the index against itself.
+
+## Page settings
+
+The button left of the download buttons names the current paper, margins and theme, for example **A4 · Normal · Book**. It opens a menu with three choices:
+
+- Paper: A4 or US Letter. The first visit picks US Letter in the countries that use it, such as the US, Canada and Mexico, and A4 elsewhere.
+- Margins: narrow (18 mm), normal (25 mm) or wide (35 mm).
+- Theme: Book (Libertinus Serif, justified, indented paragraphs), Paper (New Computer Modern, numbered sections, like a LaTeX article) or Modern (IBM Plex Sans, ragged right). Each theme's name in the menu is set in its own typeface.
+
+A choice applies at once to the preview and to **Download .pdf**, and the browser keeps it for the next visit. The theme preludes are in [`src/typst/themes/`](src/typst/themes), and [`src/typst/themes.ts`](src/typst/themes.ts) lists them with the fonts each one needs.
+
+Book uses only the fonts that load at start-up. Paper needs 2.2 MB of fonts and Modern 890 KB, and the worker downloads them only when you first choose that theme. While they download, the preview stays in the previous theme and keeps up with your typing. Over loopback in headless Chrome, a first choice of Paper showed its first pages after 189 to 217 ms, and of Modern after 163 to 184 ms. About 100 ms of that is compiling the whole document again in the new theme, and about 45 ms is drawing the visible pages. Choosing a theme again took 45 to 52 ms. To measure it, run `npm run build` and then `node bench/browser.mjs --switch`.
+
+Typing latency did not change. Over three alternating runs of `npm run bench:browser`, typing in the title measured 40.1 to 42.1 ms at p50 before page settings, with the old 6-page layout, and 40.8 to 42.2 ms after, in Book. The reflowing edit measured 23.6 to 30.0 ms before and 23.8 to 30.3 ms after.
 
 ## Run it
 
@@ -87,15 +101,14 @@ Other scripts:
 - `npm test` runs the converter, linking, scheduler and compile tests.
 - `npm run build` type-checks and builds to `dist/`.
 - `npm run bench` compares compile cost of cmarker and the JavaScript converter in Node.
-- `npm run bench:browser` measures keystroke latency in headless Chrome.
-- `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome.
+- `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, and `--switch` measures choosing a theme.
+- `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
 - `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
 ## Status
 
 The pipeline works end to end, the speed is measured, and the editor and the preview link both ways. Not built yet:
 
-- Page settings and themes.
 - Offline support and opening and saving local files.
 - Images. Image syntax renders its alt text for now.
 - Text selection in the preview.
@@ -104,6 +117,8 @@ Known limits:
 
 - The compiler WebAssembly is 28 MB, or 10.8 MB gzipped, so the first load is slow until a service worker caches it.
 - Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
+- Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking measures body text with the math font's upright letters, which have the same design, and the menu sets the name Paper in the math font.
+- If a theme's fonts fail to download, the preview stays in the previous theme and the menu keeps showing the chosen theme as loading. Choosing it again retries the download.
 - A LaTeX formula that is not valid yet, such as `\frac{1` while you type, stops the compile. The preview keeps the last good pages and shows the error until the formula is valid again.
 
 ## Licence
