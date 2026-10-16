@@ -20,7 +20,7 @@ describe('SourceIndex', () => {
   test('a line split by an emphasised word, which sits a hair lower', () => {
     // a *bc* d
     const split = index([run('a ', 10, 10), run('bc', 20, 10.2), run(' d', 30, 10)], [{ from: 0, text: 'a ' }, { from: 3, text: 'bc' }, { from: 6, text: ' d' }]);
-    expect(split.spotOf(3)).toEqual(spot(0, 0.2, 0.1, 0.102, 0.1, 0.4));
+    expect(split.spotOf(3)).toEqual(spot(0, 0.2, 0.1, 0.1, 0.1, 0.4));
     expect(split.spotOf(2)!.x).toBe(0.2);
     expect(split.spotOf(4)!.x).toBe(0.25);
     expect(split.spotOf(7)!.x).toBe(0.35);
@@ -54,10 +54,10 @@ describe('SourceIndex', () => {
     expect(table.sourceAt(0, 0.3, 0.3)).toBe(24);
   });
 
-  test('math glyphs share out the formula between the words around it', () => {
+  test('math glyphs share out the formula between the words around it, and a raised one does not stretch the line', () => {
     // if $x^2$ then
     const math = index([run('if ', 0, 0), run('x', 15, 0), run('2', 20, -2), run(' then', 25, 0)], [{ from: 0, text: 'if ' }, { from: 8, text: ' then' }]);
-    expect(math.spotOf(9)!.x).toBe(0.3);
+    expect(math.spotOf(9)).toEqual(spot(0, 0.3, 0, 0.1, 0, 0.5));
     expect(math.spotOf(4)!.x).toBe(0.2);
     expect(math.sourceAt(0, 0.16, 0.05)).toBe(3);
     expect(math.sourceAt(0, 0.31, 0.05)).toBe(9);

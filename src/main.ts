@@ -90,12 +90,33 @@ let pdfRequest: Rev | null = null;
 // Start of the keystroke now being handled: keydown, or beforeinput for edits without one (paste, IME).
 let inputStart: number | null = null;
 
-const editor = createEditor($('editor'), sample, (markdown) => {
-  rev = nextRev(rev);
-  meter.input(rev, inputStart ?? performance.now());
-  inputStart = null;
-  send({ kind: 'edit', rev, markdown });
-});
+// Ids for linking requests. Only the newest click is acted on, and a cursor spot never replaces a newer one.
+let linkId = 0;
+let clicked = 0;
+let spotShown = 0;
+let locateFrame = 0;
+/** The newest rev whose index the cursor spot was asked of; a finished new rev re-asks, since its text moved. */
+let locatedRev: Rev | null = null;
+
+/** At most once a frame, asks where the editor's cursor renders. */
+function locateCursor(): void {
+  locateFrame ||= requestAnimationFrame(() => {
+    locateFrame = 0;
+    send({ kind: 'locate', id: ++linkId, offset: editor.state.selection.main.head });
+  });
+}
+
+const editor = createEditor(
+  $('editor'),
+  sample,
+  (markdown) => {
+    rev = nextRev(rev);
+    meter.input(rev, inputStart ?? performance.now());
+    inputStart = null;
+    send({ kind: 'edit', rev, markdown });
+  },
+  locateCursor,
+);
 // Capture phase on the editor root runs before CodeMirror's own handlers apply the edit.
 editor.dom.addEventListener('keydown', (e) => (inputStart = e.timeStamp), true);
 editor.dom.addEventListener('beforeinput', (e) => (inputStart ??= e.timeStamp), true);
@@ -110,9 +131,6 @@ function download(name: string, blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(a.href));
 }
 
-// Ids for linking requests; only the newest click is acted on.
-let linkId = 0;
-let clicked = 0;
 $('pages').addEventListener('click', (e) => {
   const point = pages.pointAt(e);
   if (!point) return;
@@ -136,6 +154,10 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       break;
     case 'pages': {
       pages.show(data.sizes, data.bitmaps);
+      if (data.final && data.rev !== locatedRev) {
+        locatedRev = data.rev;
+        locateCursor();
+      }
       const sameRev = data.rev === last.rev;
       Object.assign(last, {
         rev: data.rev,
@@ -164,6 +186,11 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       break;
     case 'sourced':
       if (data.id === clicked && data.offset !== null) jumpTo(editor, data.offset);
+      break;
+    case 'located':
+      if (data.id < spotShown) break;
+      spotShown = data.id;
+      pages.showSpot(data.spot);
       break;
   }
 };

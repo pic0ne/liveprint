@@ -172,6 +172,27 @@ button:focus-visible,
   white-space: normal;
 }
 
+/* Where the editor's cursor renders. Laid over the page, never in the way of a click. */
+.cursor-mark {
+  position: absolute;
+  pointer-events: none;
+}
+
+.cursor-line,
+.cursor-caret {
+  position: absolute;
+}
+
+.cursor-line {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.cursor-caret {
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+}
+
 /* Two names for one fade, so marking the same line again restarts it. */
 .cm-line.lp-jumped-a {
   animation: lp-jumped-a 600ms ease-out forwards;

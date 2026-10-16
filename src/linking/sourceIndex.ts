@@ -22,8 +22,11 @@ export interface Spot {
 
 interface Line {
   page: number;
+  /** Everything on the line, a radical's tall stroke included. */
   top: number;
   bottom: number;
+  /** The line's longest run, which the spot covers, so one tall glyph does not stretch it. */
+  body: Run;
   left: number;
   right: number;
   runs: Placed[];
@@ -98,9 +101,15 @@ export class SourceIndex {
       for (const run of runs) {
         let line = lines[lines.length - 1];
         if (line && continues(line, run)) {
-          Object.assign(line, { top: Math.min(line.top, run.y), bottom: Math.max(line.bottom, run.y + run.h), left: Math.min(line.left, run.x), right: Math.max(line.right, run.x + run.w) });
+          Object.assign(line, {
+            top: Math.min(line.top, run.y),
+            bottom: Math.max(line.bottom, run.y + run.h),
+            left: Math.min(line.left, run.x),
+            right: Math.max(line.right, run.x + run.w),
+            body: run.text.length > line.body.text.length ? run : line.body,
+          });
         } else {
-          line = { page, top: run.y, bottom: run.y + run.h, left: run.x, right: run.x + run.w, runs: [] };
+          line = { page, top: run.y, bottom: run.y + run.h, left: run.x, right: run.x + run.w, body: run, runs: [] };
           lines.push(line);
         }
         const placed: Placed = { run, line, edges: edges(run), first: byChar.length };
@@ -189,8 +198,8 @@ export class SourceIndex {
     return {
       page: line.page,
       x: edges[char - first + (after ? 1 : 0)]! / width,
-      y: line.top / height,
-      h: (line.bottom - line.top) / height,
+      y: line.body.y / height,
+      h: line.body.h / height,
       lineLeft: line.left / width,
       lineRight: line.right / width,
     };

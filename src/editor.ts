@@ -57,7 +57,8 @@ export function jumpTo(view: EditorView, offset: number): void {
   unmark = window.setTimeout(() => view.dispatch({ effects: markJump.of(null) }), 600);
 }
 
-export function createEditor(parent: HTMLElement, doc: string, onDocChange: (doc: string) => void): EditorView {
+/** `onCursor` runs on every change of the cursor or the text, since either can move where the cursor renders. */
+export function createEditor(parent: HTMLElement, doc: string, onDocChange: (doc: string) => void, onCursor: () => void): EditorView {
   return new EditorView({
     parent,
     doc,
@@ -71,6 +72,7 @@ export function createEditor(parent: HTMLElement, doc: string, onDocChange: (doc
       jumpedLine,
       EditorView.updateListener.of((update) => {
         if (update.docChanged) onDocChange(update.state.doc.toString());
+        if (update.docChanged || update.selectionSet) onCursor();
       }),
     ],
   });
