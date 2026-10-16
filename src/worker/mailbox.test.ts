@@ -5,6 +5,8 @@ import { Mailbox } from './mailbox';
 const edit = (rev: number) => ({ kind: 'edit', rev: rev as Rev, markdown: `v${rev}` }) as const;
 const pdf = (rev: number) => ({ kind: 'pdf', rev: rev as Rev }) as const;
 const view = (widthPx: number) => ({ kind: 'view', widthPx, dpr: 1, visible: { first: 0, last: 0 } }) as const;
+const locate = (id: number) => ({ kind: 'locate', id, offset: id }) as const;
+const source = (id: number) => ({ kind: 'source', id, page: 0, fx: 0, fy: 0 }) as const;
 
 /** A mailbox whose compiles finish only when the test says so. */
 function harness() {
@@ -20,6 +22,7 @@ function harness() {
     edit: (e) => job(`edit ${e.rev}`)(),
     view: (v) => log.push(`view ${v.widthPx}`),
     pdf: (rev) => job(`pdf ${rev}`)(),
+    link: (request) => job(`${request.kind} ${request.id}`)(),
     raster: async () => {
       if (raster.batchesLeft === 0) return false;
       await job('raster')();
@@ -99,5 +102,20 @@ test('dirty pages are drawn one batch per job, after edits and PDFs, and an edit
   mailbox.receive(edit(2));
   for (let i = 0; i < 4; i++) await finishCurrent();
   expect(log).toEqual(['edit 1', 'pdf 1', 'raster', 'edit 2', 'raster', 'raster']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('linking waits for the edit, a click goes before a cursor move, and only the newest cursor move is answered', async () => {
+  const { mailbox, log, settle, finishCurrent, raster } = harness();
+  mailbox.booted();
+  raster.batchesLeft = 1;
+  mailbox.receive(edit(1));
+  await settle();
+  mailbox.receive(locate(1));
+  mailbox.receive(edit(2));
+  mailbox.receive(locate(2));
+  mailbox.receive(source(3));
+  for (let i = 0; i < 5; i++) await finishCurrent();
+  expect(log).toEqual(['edit 1', 'edit 2', 'source 3', 'locate 2', 'raster']);
   expect(mailbox.phase).toBe('idle');
 });

@@ -1,3 +1,5 @@
+import type { PageRuns, Spot } from './linking/sourceIndex';
+
 /** Editor revision. Every edit the main thread sends gets the next one. */
 export type Rev = number & { readonly __brand: 'Rev' };
 
@@ -31,10 +33,20 @@ export interface PageBitmap {
   bitmap: ImageBitmap;
 }
 
+/** Requests that link the preview and the editor. Each is answered by the reply with the same `id`. */
+export type LinkRequest =
+  /** The Markdown offset under a point on a page, in fractions of its width and height. */
+  | { kind: 'source'; id: number; page: number; fx: number; fy: number }
+  /** Where a Markdown offset renders. */
+  | { kind: 'locate'; id: number; offset: number }
+  /** Every page's text runs, which the linking check measures words against. */
+  | { kind: 'runs'; id: number };
+
 export type ToWorker =
   | { kind: 'edit'; rev: Rev; markdown: string }
   | { kind: 'pdf'; rev: Rev }
-  | ({ kind: 'view' } & View);
+  | ({ kind: 'view' } & View)
+  | LinkRequest;
 
 export type FromWorker =
   | { kind: 'ready'; bootMs: number }
@@ -52,4 +64,7 @@ export type FromWorker =
       rasterMs: number;
     }
   | { kind: 'failed'; rev: Rev; diagnostics: string[] }
-  | { kind: 'pdf'; rev: Rev; bytes: Bytes };
+  | { kind: 'pdf'; rev: Rev; bytes: Bytes }
+  | { kind: 'sourced'; id: number; offset: number | null }
+  | { kind: 'located'; id: number; spot: Spot | null }
+  | { kind: 'runs'; id: number; pages: PageRuns[] };

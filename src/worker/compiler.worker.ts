@@ -1,9 +1,12 @@
 import { CompileFormatEnum, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import { convert } from '../convert/toTypst';
-import type { Bytes, FromWorker, Rev, ToWorker } from '../protocol';
+import { fittedEdges } from '../linking/edges';
+import type { Bytes, FromWorker, LinkRequest, Rev, ToWorker } from '../protocol';
 import { createCompiler, FONT_FILES, MAIN_PATH, mainSource, PACKAGE_FILES } from '../typst/compiler';
 import prelude from '../typst/prelude.typ?raw';
+import { measureFaces } from './advances';
+import { Linker } from './linker';
 import { type Edit, Mailbox } from './mailbox';
 import { PageRaster } from './raster';
 
@@ -50,6 +53,7 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 let compiler: TypstCompiler;
 let server: IncrementalServer;
 let raster: PageRaster;
+let linker: Linker;
 
 interface Compiled {
   rev: Rev;
@@ -68,9 +72,9 @@ async function drawNext(compiled: Compiled, background: boolean): Promise<void> 
 
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const t0 = performance.now();
-  const body = convert(markdown).typst;
+  const { typst, pieces } = convert(markdown);
   const t1 = performance.now();
-  compiler.addSource(MAIN_PATH, mainSource(prelude, body));
+  compiler.addSource(MAIN_PATH, mainSource(prelude, typst));
   try {
     const { result, diagnostics = [] } = await compiler.compile({
       mainFilePath: MAIN_PATH,
@@ -83,6 +87,7 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
       return;
     }
     raster.merge(result);
+    linker.setDocument(pieces);
     shown = { rev, convertMs: t1 - t0, compileMs: t2 - t1 };
     await drawNext(shown, false);
   } catch (error) {
@@ -116,7 +121,30 @@ async function rasterNext(): Promise<boolean> {
   }
 }
 
-const mailbox = new Mailbox({ edit: compileEdit, view: (view) => raster.setView(view), pdf: compilePdf, raster: rasterNext, yieldToInbox });
+/** Answers from the document on screen. Before the first compile, or if reading the text layer fails, there is nothing to link. */
+async function answerLink(request: LinkRequest): Promise<void> {
+  const linked = shown ? await linker.linked().catch(() => null) : null;
+  switch (request.kind) {
+    case 'source':
+      post({ kind: 'sourced', id: request.id, offset: linked?.index.sourceAt(request.page, request.fx, request.fy) ?? null });
+      break;
+    case 'locate':
+      post({ kind: 'located', id: request.id, spot: linked?.index.spotOf(request.offset) ?? null });
+      break;
+    case 'runs':
+      post({ kind: 'runs', id: request.id, pages: linked?.pages ?? [] });
+      break;
+  }
+}
+
+const mailbox = new Mailbox({
+  edit: compileEdit,
+  view: (view) => raster.setView(view),
+  pdf: compilePdf,
+  link: answerLink,
+  raster: rasterNext,
+  yieldToInbox,
+});
 self.onmessage = (event: MessageEvent<ToWorker>) => mailbox.receive(event.data);
 
 async function boot(): Promise<void> {
@@ -124,7 +152,9 @@ async function boot(): Promise<void> {
     Promise.all(FONT_FILES.map(fetchBytes)),
     Promise.all(Object.entries(PACKAGE_FILES).map(async ([spec, path]) => [spec, await fetchTarball(path)] as const)),
   ]);
+  const faces = measureFaces(fonts, self.fonts);
   [compiler, raster] = await Promise.all([createCompiler({ wasm: compilerWasm, fonts, packages: new Map(packages) }), PageRaster.create()]);
+  linker = new Linker(raster, fittedEdges(await faces));
   server = await openIncrementalServer(compiler);
   post({ kind: 'ready', bootMs: performance.now() });
   mailbox.booted();

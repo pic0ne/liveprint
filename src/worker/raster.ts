@@ -1,7 +1,7 @@
 import { createTypstRenderer, type RenderSession, type TypstRenderer } from '@myriaddreamin/typst.ts/renderer';
 import rendererWasm from '@myriaddreamin/typst-ts-renderer/wasm?url';
 import type { PageBitmap, PageSize, View } from '../protocol';
-import { RasterPlan } from './rasterPlan';
+import { type PagePt, RasterPlan } from './rasterPlan';
 
 // The renderer wasm accepts only `instanceof CanvasRenderingContext2D`, which workers do not define.
 const scope = self as { CanvasRenderingContext2D?: unknown };
@@ -28,6 +28,7 @@ export class PageRaster {
   readonly #plan = new RasterPlan();
   readonly #canvas = new OffscreenCanvas(1, 1);
   readonly #context = this.#canvas.getContext('2d')!;
+  #pages: PagePt[] = [];
 
   private constructor(renderer: TypstRenderer, session: RenderSession) {
     this.#renderer = renderer;
@@ -42,7 +43,13 @@ export class PageRaster {
 
   merge(delta: Uint8Array): void {
     this.#renderer.manipulateData({ renderSession: this.#session, action: 'merge', data: delta });
-    this.#plan.setDocument(this.#session.retrievePagesInfo());
+    this.#pages = this.#session.retrievePagesInfo();
+    this.#plan.setDocument(this.#pages);
+  }
+
+  /** Every page's size in pt. */
+  get pages(): PagePt[] {
+    return this.#pages;
   }
 
   setView(view: View): void {
@@ -55,6 +62,25 @@ export class PageRaster {
 
   get final(): boolean {
     return this.#plan.final;
+  }
+
+  /** typst.ts's cache key for a page, the same one drawing it returns. Selecting no data draws nothing, so it costs about 0.1 ms. */
+  async pageKey(index: number): Promise<string> {
+    return (await this.#render(index, { body: false, semantics: false })).cacheKey;
+  }
+
+  /** A page's text layer, the HTML typst.ts builds for selecting text: 1–4 ms a page. */
+  async semantics(index: number): Promise<string> {
+    return (await this.#render(index, { body: false, semantics: true })).htmlSemantics.join('');
+  }
+
+  #render(index: number, dataSelection: { body: boolean; semantics: boolean }) {
+    return this.#renderer.renderCanvas({
+      renderSession: this.#session,
+      canvas: this.#context as unknown as CanvasRenderingContext2D,
+      pageOffset: index,
+      dataSelection,
+    });
   }
 
   /** Draws the plan's next batch. A page whose cache key comes back unchanged yields no bitmap. */

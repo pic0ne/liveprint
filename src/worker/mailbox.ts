@@ -1,12 +1,17 @@
-import type { Rev, ToWorker, View } from '../protocol';
+import type { LinkRequest, Rev, ToWorker, View } from '../protocol';
 
 export type Edit = Extract<ToWorker, { kind: 'edit' }>;
+
+/** Clicks go before cursor moves, and both before the check's run dump. */
+const LINK_ORDER: LinkRequest['kind'][] = ['source', 'locate', 'runs'];
 
 export interface MailboxHandlers {
   edit(edit: Edit): Promise<void>;
   /** Bookkeeping only, applied between jobs so the next job draws at the new size. */
   view(view: View): void;
   pdf(rev: Rev): Promise<void>;
+  /** Answers one linking request. */
+  link(request: LinkRequest): Promise<void>;
   /** Draws the next batch of dirty pages. False when there was none. */
   raster(): Promise<boolean>;
   /** Let queued messages land before the next job is picked, so a burst coalesces to its newest edit. */
@@ -16,7 +21,8 @@ export interface MailboxHandlers {
 /**
  * Single-slot mailbox, latest wins, and the worker's only scheduler. An edit that arrives while booting or busy
  * replaces `pending`, so stale edits are never compiled. A PDF request runs after any pending edit, so it prints
- * the newest text. Dirty pages are drawn only when nothing else waits, one batch per job, so an edit or a view
+ * the newest text. Linking requests keep one slot per kind and run after edits and PDFs, so they answer from the
+ * newest document. Dirty pages are drawn only when nothing else waits, one batch per job, so an edit or a view
  * that arrives meanwhile runs before the next batch.
  */
 export class Mailbox {
@@ -24,6 +30,7 @@ export class Mailbox {
   #pending: Edit | null = null;
   #view: View | null = null;
   #pdf: Rev | null = null;
+  readonly #links = new Map<LinkRequest['kind'], LinkRequest>();
   readonly #handlers: MailboxHandlers;
 
   constructor(handlers: MailboxHandlers) {
@@ -47,6 +54,8 @@ export class Mailbox {
       case 'pdf':
         this.#pdf = message.rev;
         break;
+      default:
+        this.#links.set(message.kind, message);
     }
     void this.#pump();
   }
@@ -69,12 +78,16 @@ export class Mailbox {
         }
         const edit = this.#pending;
         const pdf = this.#pdf;
+        const link = LINK_ORDER.map((kind) => this.#links.get(kind)).find((request) => request !== undefined);
         if (edit) {
           this.#pending = null;
           await this.#handlers.edit(edit);
         } else if (pdf !== null) {
           this.#pdf = null;
           await this.#handlers.pdf(pdf);
+        } else if (link) {
+          this.#links.delete(link.kind);
+          await this.#handlers.link(link);
         } else if (!(await this.#handlers.raster())) {
           return;
         }
