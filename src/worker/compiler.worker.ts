@@ -1,11 +1,13 @@
-import { CompileFormatEnum, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
+import { CompileFormatEnum, createTypstFontBuilder, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import { convert } from '../convert/toTypst';
-import { fittedEdges } from '../linking/edges';
-import type { Bytes, FromWorker, LinkRequest, Rev, ToWorker } from '../protocol';
+import { type Advance, fittedEdges } from '../linking/edges';
+import { type Bytes, type FromWorker, firstRev, type LinkRequest, type Rev, type ToWorker } from '../protocol';
+import { type PageSettings, sameSettings, type ThemeId } from '../settings';
 import { createCompiler, FONT_FILES, MAIN_PATH, mainSource, PACKAGE_FILES } from '../typst/compiler';
-import { preludeFor } from '../typst/themes';
+import { preludeFor, THEMES } from '../typst/themes';
 import { measureFaces } from './advances';
+import { FontFiles } from './fonts';
 import { Linker } from './linker';
 import { type Edit, Mailbox } from './mailbox';
 import { PageRaster } from './raster';
@@ -55,8 +57,30 @@ let server: IncrementalServer;
 let raster: PageRaster;
 let linker: Linker;
 
+const fonts = new FontFiles(fetchBytes);
+/** Every font the compiler has, by path. */
+const installed = new Set<string>();
+/** Advances of the installed fonts the browser could load, by path. */
+const faces = new Map<string, Advance>();
+/** What the compiler typesets with; null until the first settings arrive. */
+let applied: PageSettings | null = null;
+/** The newest settings asked for, which wait while their fonts download. */
+let wanted: PageSettings | null = null;
+
+/** The faces a fresh session in this theme would measure with, so fonts of themes visited before cannot be picked. */
+const edgesFor = (theme: ThemeId) => fittedEdges([...FONT_FILES, ...THEMES[theme].fonts].flatMap((path) => faces.get(path) ?? []));
+
+function addFaces(paths: string[], advances: (Advance | null)[]): void {
+  paths.forEach((path, i) => {
+    installed.add(path);
+    const advance = advances[i];
+    if (advance) faces.set(path, advance);
+  });
+}
+
 interface Compiled {
   rev: Rev;
+  settings: PageSettings;
   convertMs: number;
   compileMs: number;
 }
@@ -70,11 +94,61 @@ async function drawNext(compiled: Compiled, background: boolean): Promise<void> 
   post({ kind: 'pages', ...compiled, sizes: raster.sizes, bitmaps, final: raster.final, rasterMs }, bitmaps.map((b) => b.bitmap));
 }
 
+/** Gives the compiler every font loaded so far, the ones it had included, and measures the new ones for linking. */
+async function installFonts(): Promise<void> {
+  const paths = fonts.paths;
+  const added = paths.filter((path) => !installed.has(path));
+  const builder = createTypstFontBuilder();
+  await builder.init({ getModule: () => compilerWasm });
+  for (const bytes of fonts.bytes(paths)) await builder.addFontData(bytes);
+  const [measured] = await Promise.all([
+    measureFaces(fonts.bytes(added), self.fonts),
+    builder.build(async (resolver) => compiler.setFonts(resolver)),
+  ]);
+  addFaces(added, measured);
+}
+
+/**
+ * Applies the settings once their theme's fonts are in. Until then the previous settings stay, so the preview keeps
+ * up with typing, and the settings are asked for again when the download ends. Only the first settings wait for it.
+ */
+async function applySettings(next: PageSettings): Promise<boolean> {
+  wanted = next;
+  const theme = THEMES[next.theme];
+  const report = (error: unknown) =>
+    post({ kind: 'failed', rev: shown?.rev ?? firstRev, diagnostics: [`Could not load the ${theme.label} fonts: ${errorText(error)}`] });
+  // Before the first compile there is nothing to keep showing, so the fallback is Book, which needs only the boot fonts.
+  const fallBack = (error: unknown) => (report(error), applied ? false : applySettings({ ...next, theme: 'book' }));
+  if (!fonts.has(theme.fonts)) {
+    const loaded = fonts.load(theme.fonts);
+    if (applied) {
+      void loaded.then(() => mailbox.receive({ kind: 'settings', settings: wanted! }), report);
+      return false;
+    }
+    try {
+      await loaded;
+    } catch (error) {
+      return fallBack(error);
+    }
+  }
+  if (theme.fonts.some((path) => !installed.has(path))) {
+    try {
+      await installFonts();
+    } catch (error) {
+      return fallBack(error);
+    }
+  }
+  if (applied && sameSettings(applied, next)) return false;
+  applied = next;
+  return true;
+}
+
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
+  const settings = applied!;
   const t0 = performance.now();
   const { typst, pieces } = convert(markdown);
   const t1 = performance.now();
-  compiler.addSource(MAIN_PATH, mainSource(preludeFor({ paper: 'a4', margins: 'normal', theme: 'book' }), typst));
+  compiler.addSource(MAIN_PATH, mainSource(preludeFor(settings), typst));
   try {
     const { result, diagnostics = [] } = await compiler.compile({
       mainFilePath: MAIN_PATH,
@@ -87,8 +161,8 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
       return;
     }
     raster.merge(result);
-    linker.setDocument(pieces);
-    shown = { rev, convertMs: t1 - t0, compileMs: t2 - t1 };
+    linker.setDocument(pieces, edgesFor(settings.theme));
+    shown = { rev, settings, convertMs: t1 - t0, compileMs: t2 - t1 };
     await drawNext(shown, false);
   } catch (error) {
     post({ kind: 'failed', rev, diagnostics: [errorText(error)] });
@@ -138,6 +212,7 @@ async function answerLink(request: LinkRequest): Promise<void> {
 }
 
 const mailbox = new Mailbox({
+  settings: applySettings,
   edit: compileEdit,
   view: (view) => raster.setView(view),
   pdf: compilePdf,
@@ -145,16 +220,22 @@ const mailbox = new Mailbox({
   raster: rasterNext,
   yieldToInbox,
 });
-self.onmessage = (event: MessageEvent<ToWorker>) => mailbox.receive(event.data);
+self.onmessage = ({ data }: MessageEvent<ToWorker>) => {
+  // A theme's fonts start downloading when it is chosen, even while the worker boots or compiles.
+  if (data.kind === 'settings') fonts.load(THEMES[data.settings.theme].fonts).catch(() => {});
+  mailbox.receive(data);
+};
 
 async function boot(): Promise<void> {
-  const [fonts, packages] = await Promise.all([
-    Promise.all(FONT_FILES.map(fetchBytes)),
+  const [, packages] = await Promise.all([
+    fonts.load(FONT_FILES),
     Promise.all(Object.entries(PACKAGE_FILES).map(async ([spec, path]) => [spec, await fetchTarball(path)] as const)),
   ]);
-  const faces = measureFaces(fonts, self.fonts);
-  [compiler, raster] = await Promise.all([createCompiler({ wasm: compilerWasm, fonts, packages: new Map(packages) }), PageRaster.create()]);
-  linker = new Linker(raster, fittedEdges(await faces));
+  const bootFonts = fonts.bytes(FONT_FILES);
+  const measured = measureFaces(bootFonts, self.fonts);
+  [compiler, raster] = await Promise.all([createCompiler({ wasm: compilerWasm, fonts: bootFonts, packages: new Map(packages) }), PageRaster.create()]);
+  addFaces([...FONT_FILES], await measured);
+  linker = new Linker(raster);
   server = await openIncrementalServer(compiler);
   post({ kind: 'ready', bootMs: performance.now() });
   mailbox.booted();

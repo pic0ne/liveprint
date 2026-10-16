@@ -3,6 +3,7 @@ import { afterNextPaint, LatencyMeter } from './metrics';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
 import sample from './sample.md?raw';
+import { defaultSettings } from './settings';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -83,6 +84,7 @@ drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
 const send = (message: ToWorker) => worker.postMessage(message);
+send({ kind: 'settings', settings: defaultSettings(navigator.language) });
 const pages = new Pages($('pages'), (view) => send({ kind: 'view', ...view }));
 
 let rev: Rev = firstRev;

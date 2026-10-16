@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Rev } from '../protocol';
+import type { ThemeId } from '../settings';
 import { Mailbox } from './mailbox';
 
 const edit = (rev: number) => ({ kind: 'edit', rev: rev as Rev, markdown: `v${rev}` }) as const;
@@ -7,6 +8,7 @@ const pdf = (rev: number) => ({ kind: 'pdf', rev: rev as Rev }) as const;
 const view = (widthPx: number) => ({ kind: 'view', widthPx, dpr: 1, visible: { first: 0, last: 0 } }) as const;
 const locate = (id: number) => ({ kind: 'locate', id, offset: id }) as const;
 const source = (id: number) => ({ kind: 'source', id, page: 0, fx: 0, fy: 0 }) as const;
+const settings = (theme: ThemeId) => ({ kind: 'settings', settings: { paper: 'a4', margins: 'normal', theme } }) as const;
 
 /** A mailbox whose compiles finish only when the test says so. */
 function harness() {
@@ -18,7 +20,13 @@ function harness() {
       running.push(resolve);
     });
   const raster = { batchesLeft: 0 };
+  /** Themes whose settings the handler reports as changing the document. */
+  const changes = new Set<ThemeId>(['paper', 'modern']);
   const mailbox = new Mailbox({
+    settings: async (s) => {
+      await job(`settings ${s.theme}`)();
+      return changes.has(s.theme);
+    },
     edit: (e) => job(`edit ${e.rev}`)(),
     view: (v) => log.push(`view ${v.widthPx}`),
     pdf: (rev) => job(`pdf ${rev}`)(),
@@ -117,5 +125,60 @@ test('linking waits for the edit, a click goes before a cursor move, and only th
   mailbox.receive(source(3));
   for (let i = 0; i < 5; i++) await finishCurrent();
   expect(log).toEqual(['edit 1', 'edit 2', 'source 3', 'locate 2', 'raster']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('settings sent while booting coalesce to the newest and run before the first edit', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.receive(settings('paper'));
+  mailbox.receive(edit(1));
+  mailbox.receive(settings('modern'));
+  mailbox.booted();
+  await settle();
+  await finishCurrent();
+  await finishCurrent();
+  expect(log).toEqual(['settings modern', 'edit 1']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('a settings change and an edit in the same burst compile once, with both', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  mailbox.receive(edit(2));
+  mailbox.receive(settings('paper'));
+  for (let i = 0; i < 3; i++) await finishCurrent();
+  expect(log).toEqual(['edit 1', 'settings paper', 'edit 2']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('a settings change on its own compiles the last edit again, and one that changes nothing does not', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  await finishCurrent();
+  mailbox.receive(settings('modern'));
+  await settle();
+  await finishCurrent();
+  await finishCurrent();
+  mailbox.receive(settings('book'));
+  await settle();
+  await finishCurrent();
+  expect(log).toEqual(['edit 1', 'settings modern', 'edit 1', 'settings book']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('settings go before a PDF request and linking, so both answer from the new document', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  mailbox.receive(locate(2));
+  mailbox.receive(pdf(1));
+  mailbox.receive(settings('paper'));
+  for (let i = 0; i < 5; i++) await finishCurrent();
+  expect(log).toEqual(['edit 1', 'settings paper', 'edit 1', 'pdf 1', 'locate 2']);
   expect(mailbox.phase).toBe('idle');
 });

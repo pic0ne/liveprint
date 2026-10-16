@@ -1,11 +1,19 @@
 import type { Advance } from '../linking/edges';
 
-/** Each font's advance widths per pt of font size, measured on a canvas in the faces typst lays the pages out with. */
-export async function measureFaces(fonts: Uint8Array[], into: FontFaceSet): Promise<Advance[]> {
+/** Family names stay unique across calls, as every face joins the same set. */
+let count = 0;
+
+/**
+ * Each font's advance widths per pt of font size, measured on a canvas in the faces typst lays the pages out with.
+ * Null for a font the browser will not load: Chrome's sanitizer rejects the CFF of NewCM10 Regular and Italic,
+ * which typst reads fine.
+ */
+export async function measureFaces(fonts: Uint8Array[], into: FontFaceSet): Promise<(Advance | null)[]> {
   const context = new OffscreenCanvas(1, 1).getContext('2d')!;
-  const faces = fonts.map((bytes, i) => new FontFace(`liveprint-measure-${i}`, bytes as Uint8Array<ArrayBuffer>));
-  await Promise.all(faces.map((face) => face.load()));
-  return faces.map((face) => {
+  const faces = fonts.map((bytes) => new FontFace(`liveprint-measure-${count++}`, bytes as Uint8Array<ArrayBuffer>));
+  const loaded = await Promise.all(faces.map((face) => face.load().then(() => face, () => null)));
+  return loaded.map((face) => {
+    if (!face) return null;
     into.add(face);
     const font = `100px "${face.family}"`;
     const widths = new Map<string, number>();

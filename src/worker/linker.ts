@@ -16,24 +16,25 @@ export interface Linked {
  */
 export class Linker {
   readonly #raster: PageRaster;
-  readonly #edges: Edges;
+  /** A run belongs to one page's cache key, and so to one theme, so its edges are measured once. */
+  readonly #measured = new WeakMap<Run, number[]>();
+  #edges: Edges = () => [];
   #pieces: TextPiece[] = [];
   #linked: Linked | null = null;
   #runs = new Map<string, Run[]>();
 
-  constructor(raster: PageRaster, edges: Edges) {
+  constructor(raster: PageRaster) {
     this.#raster = raster;
-    const measured = new WeakMap<Run, number[]>();
-    this.#edges = (run) => {
-      let out = measured.get(run);
-      if (!out) measured.set(run, (out = edges(run)));
-      return out;
-    };
   }
 
-  /** The Markdown text of the document just merged into the raster. */
-  setDocument(pieces: TextPiece[]): void {
+  /** The Markdown text of the document just merged into the raster, and how to measure its runs. */
+  setDocument(pieces: TextPiece[], edges: Edges): void {
     this.#pieces = pieces;
+    this.#edges = (run) => {
+      let out = this.#measured.get(run);
+      if (!out) this.#measured.set(run, (out = edges(run)));
+      return out;
+    };
     this.#linked = null;
   }
 

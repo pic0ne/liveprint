@@ -1,4 +1,5 @@
 import type { PageRuns, Spot } from './linking/sourceIndex';
+import type { PageSettings } from './settings';
 
 /** Editor revision. Every edit the main thread sends gets the next one. */
 export type Rev = number & { readonly __brand: 'Rev' };
@@ -43,6 +44,8 @@ export type LinkRequest =
   | { kind: 'runs'; id: number };
 
 export type ToWorker =
+  /** Sent before the first edit and on every change. */
+  | { kind: 'settings'; settings: PageSettings }
   | { kind: 'edit'; rev: Rev; markdown: string }
   | { kind: 'pdf'; rev: Rev }
   | ({ kind: 'view' } & View)
@@ -53,6 +56,8 @@ export type FromWorker =
   | {
       kind: 'pages';
       rev: Rev;
+      /** What the pages are typeset with. A new theme shows here only once its fonts are in. */
+      settings: PageSettings;
       /** Every page, so the preview can reserve space for pages not drawn yet. */
       sizes: PageSize[];
       /** Only the pages redrawn since the last message. */

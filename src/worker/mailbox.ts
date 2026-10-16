@@ -1,4 +1,5 @@
 import type { LinkRequest, Rev, ToWorker, View } from '../protocol';
+import type { PageSettings } from '../settings';
 
 export type Edit = Extract<ToWorker, { kind: 'edit' }>;
 
@@ -6,6 +7,8 @@ export type Edit = Extract<ToWorker, { kind: 'edit' }>;
 const LINK_ORDER: LinkRequest['kind'][] = ['source', 'locate', 'runs'];
 
 export interface MailboxHandlers {
+  /** True when the document must compile again to show them. */
+  settings(settings: PageSettings): Promise<boolean>;
   edit(edit: Edit): Promise<void>;
   /** Bookkeeping only, applied between jobs so the next job draws at the new size. */
   view(view: View): void;
@@ -20,14 +23,18 @@ export interface MailboxHandlers {
 
 /**
  * Single-slot mailbox, latest wins, and the worker's only scheduler. An edit that arrives while booting or busy
- * replaces `pending`, so stale edits are never compiled. A PDF request runs after any pending edit, so it prints
- * the newest text. Linking requests keep one slot per kind and run after edits and PDFs, so they answer from the
- * newest document. Dirty pages are drawn only when nothing else waits, one batch per job, so an edit or a view
- * that arrives meanwhile runs before the next batch.
+ * replaces `pending`, so stale edits are never compiled. Settings coalesce the same way and run before the edit, so
+ * a change and an edit in one burst compile once. A change on its own compiles the last edit again. A PDF request
+ * runs after any pending edit, so it prints the newest text. Linking requests keep one slot per kind and run after
+ * edits and PDFs, so they answer from the newest document. Dirty pages are drawn only when nothing else waits, one
+ * batch per job, so an edit or a view that arrives meanwhile runs before the next batch.
  */
 export class Mailbox {
   #phase: 'booting' | 'idle' | 'busy' = 'booting';
+  #settings: PageSettings | null = null;
   #pending: Edit | null = null;
+  /** The newest edit compiled, which a settings change compiles again. */
+  #last: Edit | null = null;
   #view: View | null = null;
   #pdf: Rev | null = null;
   readonly #links = new Map<LinkRequest['kind'], LinkRequest>();
@@ -43,6 +50,9 @@ export class Mailbox {
 
   receive(message: ToWorker): void {
     switch (message.kind) {
+      case 'settings':
+        this.#settings = message.settings;
+        break;
       case 'edit':
         this.#pending = message;
         break;
@@ -76,11 +86,16 @@ export class Mailbox {
           this.#view = null;
           this.#handlers.view(view);
         }
+        const settings = this.#settings;
         const edit = this.#pending;
         const pdf = this.#pdf;
         const link = LINK_ORDER.map((kind) => this.#links.get(kind)).find((request) => request !== undefined);
-        if (edit) {
+        if (settings) {
+          this.#settings = null;
+          if (await this.#handlers.settings(settings)) this.#pending ??= this.#last;
+        } else if (edit) {
           this.#pending = null;
+          this.#last = edit;
           await this.#handlers.edit(edit);
         } else if (pdf !== null) {
           this.#pdf = null;
