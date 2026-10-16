@@ -1,0 +1,20 @@
+{
+  "name": "liveprint",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "dependencies": {
+    "@myriaddreamin/typst-ts-renderer": "^0.7.0",
+    "@myriaddreamin/typst-ts-web-compiler": "^0.7.0",
+    "@myriaddreamin/typst.ts": "^0.7.0"
+  }
+}
