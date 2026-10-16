@@ -10,8 +10,12 @@
     <header class="bar">
       <span class="wordmark">liveprint</span>
       <div class="actions">
-        <button type="button" id="download-md">Download .md</button>
-        <button type="button" id="download-pdf">Download .pdf</button>
+        <div class="settings" id="settings">
+          <button type="button" aria-expanded="false" aria-controls="settings-panel">A4 · Normal · Book</button>
+          <div class="settings-panel" id="settings-panel" role="group" aria-label="Page settings" hidden></div>
+        </div>
+        <button type="button" id="download-md" aria-label="Download .md"><span class="long">Download </span>.md</button>
+        <button type="button" id="download-pdf" aria-label="Download .pdf"><span class="long">Download </span>.pdf</button>
       </div>
     </header>
     <main class="split" id="split">

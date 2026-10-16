@@ -10,7 +10,7 @@ export interface Theme {
   source: string;
   /** Fonts under public/ the theme needs beyond the ones loaded at boot. */
   fonts: readonly string[];
-  /** The text face under public/, which the settings menu sets the theme's name in. */
+  /** A face under public/ that the settings menu sets the theme's name in. */
   face: string;
 }
 
@@ -21,7 +21,8 @@ export const THEMES: Record<ThemeId, Theme> = {
     label: 'Paper',
     source: paper,
     fonts: ['fonts/NewCM10-Regular.otf', 'fonts/NewCM10-Italic.otf', 'fonts/NewCM10-Bold.otf', 'fonts/NewCM10-BoldItalic.otf'],
-    face: 'fonts/NewCM10-Regular.otf',
+    // Chrome rejects the CFF in NewCM10-Regular.otf. The math font's upright Latin letters are the same design.
+    face: 'fonts/NewCMMath-Regular.otf',
   },
   modern: {
     id: 'modern',

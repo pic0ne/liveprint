@@ -3,7 +3,8 @@ import { afterNextPaint, LatencyMeter } from './metrics';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
 import sample from './sample.md?raw';
-import { defaultSettings } from './settings';
+import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
+import { SettingsMenu } from './settingsMenu';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -84,7 +85,20 @@ drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
 const send = (message: ToWorker) => worker.postMessage(message);
-send({ kind: 'settings', settings: defaultSettings(navigator.language) });
+
+const SETTINGS_KEY = 'liveprint.page';
+let stored: string | null = null;
+try {
+  stored = localStorage.getItem(SETTINGS_KEY);
+} catch {}
+const settings = parseSettings(stored, defaultSettings(navigator.language));
+send({ kind: 'settings', settings });
+const menu = new SettingsMenu($('settings'), settings, (next) => {
+  send({ kind: 'settings', settings: next });
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+  } catch {}
+});
 const pages = new Pages($('pages'), (view) => send({ kind: 'view', ...view }));
 
 let rev: Rev = firstRev;
@@ -97,8 +111,8 @@ let linkId = 0;
 let clicked = 0;
 let spotShown = 0;
 let locateFrame = 0;
-/** The newest rev whose index the cursor spot was asked of; a finished new rev re-asks, since its text moved. */
-let locatedRev: Rev | null = null;
+/** The newest document whose index the cursor spot was asked of. A new finished one re-asks, since its text moved. */
+let located: { rev: Rev; settings: PageSettings } | null = null;
 
 /** At most once a frame, asks where the editor's cursor renders. */
 function locateCursor(): void {
@@ -156,8 +170,9 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       break;
     case 'pages': {
       pages.show(data.sizes, data.bitmaps);
-      if (data.final && data.rev !== locatedRev) {
-        locatedRev = data.rev;
+      menu.showing(data.settings.theme);
+      if (data.final && !(located?.rev === data.rev && sameSettings(located.settings, data.settings))) {
+        located = { rev: data.rev, settings: data.settings };
         locateCursor();
       }
       const sameRev = data.rev === last.rev;

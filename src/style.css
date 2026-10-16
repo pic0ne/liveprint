@@ -20,6 +20,8 @@
   --overlay: #f7f6f3;
   --failure: #9a3412;
   --accent: #2563d0;
+  --panel: #f7f6f3;
+  --segment-on: #fdfcfa;
   color-scheme: light;
 }
 
@@ -40,6 +42,8 @@
     --overlay: #232220;
     --failure: #f0a07a;
     --accent: #3b7be8;
+    --panel: #2a2926;
+    --segment-on: #4d4b46;
     color-scheme: dark;
   }
 }
@@ -97,9 +101,95 @@ button:hover {
 }
 
 button:focus-visible,
-.divider:focus-visible {
+.divider:focus-visible,
+.segments label:has(:focus-visible) {
   outline: 2px solid var(--link);
   outline-offset: -2px;
+}
+
+.settings {
+  position: relative;
+}
+
+/* A menu over the page, the one thing here that casts a shadow. */
+.settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  width: max-content;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: var(--panel);
+  box-shadow:
+    0 10px 28px rgb(0 0 0 / 0.16),
+    0 2px 6px rgb(0 0 0 / 0.08);
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-panel fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-panel legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.segments {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--button);
+}
+
+.segments label {
+  position: relative;
+  flex: 1;
+  padding: 5px 14px;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segments label:hover {
+  background: var(--button-hover);
+}
+
+.segments label:has(:checked) {
+  background: var(--segment-on);
+}
+
+.segments input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segments [name='theme'] + span {
+  font-size: 17px;
+  line-height: 20px;
+}
+
+.segments label[data-loading] span {
+  animation: lp-loading 900ms ease-in-out infinite alternate;
+}
+
+@keyframes lp-loading {
+  to {
+    opacity: 0.35;
+  }
 }
 
 .split {
@@ -226,6 +316,11 @@ button:focus-visible,
     animation: none;
     background: color-mix(in srgb, var(--accent) 22%, transparent);
   }
+
+  .segments label[data-loading] span {
+    animation: none;
+    opacity: 0.5;
+  }
 }
 
 @media (max-width: 720px) {
@@ -240,5 +335,34 @@ button:focus-visible,
 
   .pages {
     padding: 16px;
+  }
+
+  .bar {
+    position: relative;
+    gap: 12px;
+  }
+
+  .actions {
+    gap: 6px;
+  }
+
+  .actions .long {
+    display: none;
+  }
+
+  button {
+    padding: 6px 10px;
+  }
+
+  /* Anchored to the bar instead of the button, so it spans the screen less the gutters. */
+  .settings {
+    position: static;
+  }
+
+  .settings-panel {
+    left: 16px;
+    right: 16px;
+    width: auto;
+    top: calc(100% + 2px);
   }
 }
