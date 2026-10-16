@@ -32,10 +32,11 @@ async function connect(url) {
     if (waiting.has(m.id)) waiting.get(m.id)(m);
     else for (const listener of listeners) listener(m);
   };
-  const send = (method, params = {}) =>
+  /** `sessionId` addresses a target attached with `flatten: true`, such as a page's worker. */
+  const send = (method, params = {}, sessionId) =>
     new Promise((resolve, reject) => {
       waiting.set(++id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message}`)) : resolve(m.result)));
-      ws.send(JSON.stringify({ id, method, params }));
+      ws.send(JSON.stringify({ id, method, params, sessionId }));
     });
   await new Promise((r) => (ws.onopen = r));
   return { send, listeners };
@@ -66,6 +67,11 @@ export async function launch({ width = 1400, height = 900 } = {}) {
     browser,
     page,
     evaluate,
+    /** Stops `vite preview` and waits until nothing answers, so the page is left with no network for the app. */
+    async stopServer() {
+      server.kill();
+      await until('vite preview stopped', () => fetch(`http://127.0.0.1:${webPort}/`).then(() => false, () => true));
+    },
     async close() {
       chrome.kill();
       server.kill();
