@@ -1,5 +1,6 @@
 import { createEditor, jumpTo } from './editor';
 import { afterNextPaint, LatencyMeter } from './metrics';
+import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
 import sample from './sample.md?raw';
@@ -170,6 +171,7 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       break;
     case 'pages': {
       pages.show(data.sizes, data.bitmaps);
+      registerServiceWorker();
       menu.showing(data.settings.theme);
       if (data.final && !(located?.rev === data.rev && sameSettings(located.settings, data.settings))) {
         located = { rev: data.rev, settings: data.settings };
