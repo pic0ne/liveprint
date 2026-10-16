@@ -51,6 +51,21 @@ let compiler: TypstCompiler;
 let server: IncrementalServer;
 let raster: PageRaster;
 
+interface Compiled {
+  rev: Rev;
+  convertMs: number;
+  compileMs: number;
+}
+/** The compile whose document the raster holds. */
+let shown: Compiled | null = null;
+
+/** Draws the next batch. A background batch whose pages all kept their cache key is not posted, unless it was the last. */
+async function drawNext(compiled: Compiled, background: boolean): Promise<void> {
+  const { bitmaps, rasterMs } = await raster.draw();
+  if (background && bitmaps.length === 0 && !raster.final) return;
+  post({ kind: 'pages', ...compiled, sizes: raster.sizes, bitmaps, final: raster.final, rasterMs }, bitmaps.map((b) => b.bitmap));
+}
+
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const t0 = performance.now();
   const body = toTypst(markdown);
@@ -68,10 +83,8 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
       return;
     }
     raster.merge(result);
-    const bitmaps = [];
-    while (!raster.final) bitmaps.push(...(await raster.draw()).bitmaps);
-    const message = { rev, sizes: raster.sizes, bitmaps, final: true, convertMs: t1 - t0, compileMs: t2 - t1 };
-    post({ kind: 'pages', ...message, rasterMs: performance.now() - t2 }, bitmaps.map((b) => b.bitmap));
+    shown = { rev, convertMs: t1 - t0, compileMs: t2 - t1 };
+    await drawNext(shown, false);
   } catch (error) {
     post({ kind: 'failed', rev, diagnostics: [errorText(error)] });
   }
@@ -91,7 +104,13 @@ async function compilePdf(rev: Rev): Promise<void> {
   }
 }
 
-const mailbox = new Mailbox({ edit: compileEdit, view: (view) => raster.setView(view), pdf: compilePdf, yieldToInbox });
+async function rasterNext(): Promise<boolean> {
+  if (!shown || raster.final) return false;
+  await drawNext(shown, true);
+  return true;
+}
+
+const mailbox = new Mailbox({ edit: compileEdit, view: (view) => raster.setView(view), pdf: compilePdf, raster: rasterNext, yieldToInbox });
 self.onmessage = (event: MessageEvent<ToWorker>) => mailbox.receive(event.data);
 
 async function boot(): Promise<void> {

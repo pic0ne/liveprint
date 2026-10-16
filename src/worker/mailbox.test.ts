@@ -15,10 +15,17 @@ function harness() {
       log.push(name);
       running.push(resolve);
     });
+  const raster = { batchesLeft: 0 };
   const mailbox = new Mailbox({
     edit: (e) => job(`edit ${e.rev}`)(),
     view: (v) => log.push(`view ${v.widthPx}`),
     pdf: (rev) => job(`pdf ${rev}`)(),
+    raster: async () => {
+      if (raster.batchesLeft === 0) return false;
+      await job('raster')();
+      raster.batchesLeft--;
+      return true;
+    },
     yieldToInbox: () => Promise.resolve(),
   });
   const settle = () => new Promise((r) => setTimeout(r));
@@ -26,7 +33,7 @@ function harness() {
     running.shift()?.();
     await settle();
   };
-  return { mailbox, log, settle, finishCurrent };
+  return { mailbox, log, settle, finishCurrent, raster };
 }
 
 test('edits sent while booting coalesce to the newest', async () => {
@@ -78,4 +85,19 @@ test('views coalesce to the newest and apply before the job they arrived ahead o
   await finishCurrent();
   await finishCurrent();
   expect(log).toEqual(['view 300', 'edit 1', 'view 500', 'edit 2']);
+});
+
+test('dirty pages are drawn one batch per job, after edits and PDFs, and an edit arriving mid-raster goes next', async () => {
+  const { mailbox, log, settle, finishCurrent, raster } = harness();
+  mailbox.booted();
+  raster.batchesLeft = 3;
+  mailbox.receive(edit(1));
+  mailbox.receive(pdf(1));
+  await settle();
+  await finishCurrent();
+  await finishCurrent();
+  mailbox.receive(edit(2));
+  for (let i = 0; i < 4; i++) await finishCurrent();
+  expect(log).toEqual(['edit 1', 'pdf 1', 'raster', 'edit 2', 'raster', 'raster']);
+  expect(mailbox.phase).toBe('idle');
 });

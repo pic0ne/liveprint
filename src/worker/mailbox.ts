@@ -7,6 +7,8 @@ export interface MailboxHandlers {
   /** Bookkeeping only, applied between jobs so the next job draws at the new size. */
   view(view: View): void;
   pdf(rev: Rev): Promise<void>;
+  /** Draws the next batch of dirty pages. False when there was none. */
+  raster(): Promise<boolean>;
   /** Let queued messages land before the next job is picked, so a burst coalesces to its newest edit. */
   yieldToInbox(): Promise<void>;
 }
@@ -14,7 +16,8 @@ export interface MailboxHandlers {
 /**
  * Single-slot mailbox, latest wins, and the worker's only scheduler. An edit that arrives while booting or busy
  * replaces `pending`, so stale edits are never compiled. A PDF request runs after any pending edit, so it prints
- * the newest text.
+ * the newest text. Dirty pages are drawn only when nothing else waits, one batch per job, so an edit or a view
+ * that arrives meanwhile runs before the next batch.
  */
 export class Mailbox {
   #phase: 'booting' | 'idle' | 'busy' = 'booting';
@@ -72,7 +75,7 @@ export class Mailbox {
         } else if (pdf !== null) {
           this.#pdf = null;
           await this.#handlers.pdf(pdf);
-        } else {
+        } else if (!(await this.#handlers.raster())) {
           return;
         }
       }

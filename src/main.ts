@@ -60,7 +60,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 const meter = new LatencyMeter();
-const last = { bootMs: NaN, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, failure: '' };
+// Raster time and redrawn pages add up over every `pages` message of one rev.
+const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, failure: '' };
 const ms = (n: number) => (Number.isNaN(n) ? '–' : n.toFixed(1));
 
 /** Timings only while toggled on; the first diagnostic of a failed compile always shows. */
@@ -69,8 +70,8 @@ function drawOverlay(): void {
   const stats = statsVisible
     ? [
         `keystroke → preview  ${ms(s.last)}  p50 ${ms(s.p50)}  p95 ${ms(s.p95)} ms  (${s.count})`,
-        `convert ${ms(last.convertMs)}  compile ${ms(last.compileMs)}  raster ${ms(last.rasterMs)} ms (${last.redrawn} redrawn)`,
-        `${last.pages} ${last.pages === 1 ? 'page' : 'pages'}, compiler ready in ${ms(last.bootMs)} ms`,
+        `convert ${ms(last.convertMs)}  compile ${ms(last.compileMs)}  raster ${ms(last.rasterMs)} ms`,
+        `${last.redrawn} of ${last.pages} ${last.pages === 1 ? 'page' : 'pages'} redrawn, compiler ready in ${ms(last.bootMs)} ms`,
       ]
     : [];
   const lines = stats.map((text) => Object.assign(document.createElement('div'), { textContent: text }));
@@ -125,11 +126,13 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       break;
     case 'pages': {
       pages.show(data.sizes, data.bitmaps);
+      const sameRev = data.rev === last.rev;
       Object.assign(last, {
+        rev: data.rev,
         convertMs: data.convertMs,
         compileMs: data.compileMs,
-        rasterMs: data.rasterMs,
-        redrawn: data.bitmaps.length,
+        rasterMs: (sameRev ? last.rasterMs : 0) + data.rasterMs,
+        redrawn: (sameRev ? last.redrawn : 0) + data.bitmaps.length,
         pages: data.sizes.length,
         failure: '',
       });

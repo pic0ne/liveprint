@@ -136,6 +136,7 @@ button:focus-visible,
   position: relative;
   height: 100%;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 24px;
 }
 
