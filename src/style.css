@@ -127,7 +127,8 @@ body {
 }
 
 button.quiet {
-  padding: 2px 8px;
+  height: 24px;
+  padding: 0 8px;
   color: inherit;
   background: var(--button-quiet);
 }
@@ -144,12 +145,13 @@ button.quiet:hover {
 }
 
 button {
+  height: 32px;
+  padding: 0 12px;
   font: inherit;
   color: var(--ink);
   background: var(--button);
   border: 0;
-  border-radius: 0;
-  padding: 6px 12px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -157,11 +159,35 @@ button:hover {
   background: var(--button-hover);
 }
 
+/* The one filled button: the PDF is what the app makes. */
+#download-pdf {
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 500;
+}
+
+#download-pdf:hover {
+  background: var(--accent-hover);
+}
+
+#settings > button {
+  background: transparent;
+}
+
+#settings > button:hover,
+#settings > button[aria-expanded='true'] {
+  background: var(--button);
+}
+
 button:focus-visible,
 .divider:focus-visible,
 .segments label:has(:focus-visible) {
-  outline: 2px solid var(--link);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+button:focus-visible {
+  outline-offset: 2px;
 }
 
 .settings {
@@ -178,6 +204,7 @@ button:focus-visible,
   display: grid;
   gap: 12px;
   padding: 12px;
+  border-radius: 8px;
   background: var(--panel);
   box-shadow:
     0 10px 28px rgb(0 0 0 / 0.16),
@@ -206,6 +233,7 @@ button:focus-visible,
   display: flex;
   gap: 2px;
   padding: 2px;
+  border-radius: 6px;
   background: var(--button);
 }
 
@@ -213,6 +241,7 @@ button:focus-visible,
   position: relative;
   flex: 1;
   padding: 5px 14px;
+  border-radius: 4px;
   text-align: center;
   white-space: nowrap;
   cursor: pointer;
@@ -305,7 +334,8 @@ button:focus-visible,
   right: 12px;
   bottom: 12px;
   max-width: calc(100% - 24px);
-  padding: 8px 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
   background: var(--overlay);
   color: var(--ink);
   font-size: 12px;
@@ -433,7 +463,7 @@ button:focus-visible,
   }
 
   button {
-    padding: 6px 10px;
+    padding: 0 10px;
   }
 
   /* Anchored to the bar instead of the button, so it spans the screen less the gutters. */
