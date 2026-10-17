@@ -1,4 +1,6 @@
+import { type Doc, documentTitle, isEdited, pdfName, untitled } from './doc';
 import { createEditor, jumpTo } from './editor';
+import { download, openFile, saveFile } from './files';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
@@ -64,10 +66,10 @@ window.addEventListener('keydown', (e) => {
 
 const meter = new LatencyMeter();
 // Raster time and redrawn pages add up over every `pages` message of one rev.
-const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, failure: '' };
+const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, failure: '', fileFailure: '' };
 const ms = (n: number) => (Number.isNaN(n) ? '–' : n.toFixed(1));
 
-/** Timings only while toggled on; the first diagnostic of a failed compile always shows. */
+/** Timings only while toggled on; the first diagnostic of a failed compile and a failed open or save always show. */
 function drawOverlay(): void {
   const s = meter.stats();
   const stats = statsVisible
@@ -78,7 +80,9 @@ function drawOverlay(): void {
       ]
     : [];
   const lines = stats.map((text) => Object.assign(document.createElement('div'), { textContent: text }));
-  if (last.failure) lines.push(Object.assign(document.createElement('div'), { textContent: last.failure, className: 'failure' }));
+  for (const failure of [last.failure, last.fileFailure].filter(Boolean)) {
+    lines.push(Object.assign(document.createElement('div'), { textContent: failure, className: 'failure' }));
+  }
   overlay.replaceChildren(...lines);
   overlay.hidden = lines.length === 0;
 }
@@ -123,14 +127,16 @@ function locateCursor(): void {
   });
 }
 
-const editor = createEditor(
+const start: Doc = untitled(sample);
+let file = start.file;
+
+const { view: editor, load } = createEditor(
   $('editor'),
-  sample,
+  start.text,
   (markdown) => {
-    rev = nextRev(rev);
+    changed(markdown);
     meter.input(rev, inputStart ?? performance.now());
     inputStart = null;
-    send({ kind: 'edit', rev, markdown });
   },
   locateCursor,
 );
@@ -138,15 +144,90 @@ const editor = createEditor(
 editor.dom.addEventListener('keydown', (e) => (inputStart = e.timeStamp), true);
 editor.dom.addEventListener('beforeinput', (e) => (inputStart ??= e.timeStamp), true);
 editor.dom.addEventListener('keyup', () => (inputStart = null), true);
-send({ kind: 'edit', rev, markdown: sample });
+send({ kind: 'edit', rev, markdown: start.text });
 
-function download(name: string, blob: Blob): void {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href));
+const fileName = $('file-name');
+const editedMark = $('file-edited');
+let shownFile = '';
+
+function showFile(text = editor.state.doc.toString()): void {
+  const edited = isEdited(text, file);
+  const shown = `${edited} ${file.name}`;
+  if (shown === shownFile) return;
+  shownFile = shown;
+  fileName.textContent = fileName.title = file.name;
+  editedMark.hidden = !edited;
+  document.title = documentTitle(file.name, edited);
 }
+showFile();
+
+window.addEventListener('beforeunload', (e) => {
+  if (isEdited(editor.state.doc.toString(), file)) e.preventDefault();
+});
+
+function changed(markdown: string): void {
+  rev = nextRev(rev);
+  send({ kind: 'edit', rev, markdown });
+  showFile(markdown);
+}
+
+function openDoc(doc: Doc): void {
+  load(doc.text);
+  file = doc.file;
+  $('pages').scrollTop = 0;
+  changed(doc.text);
+}
+
+const mayDiscard = () => !isEdited(editor.state.doc.toString(), file) || confirm(`Discard unsaved changes to ${file.name}?`);
+
+let busy = false;
+/** One open or save at a time. A failure shows under the preview until the next attempt. */
+async function fileAction(verb: string, action: () => Promise<void>): Promise<void> {
+  if (busy) return;
+  busy = true;
+  last.fileFailure = '';
+  try {
+    await action();
+  } catch (error) {
+    last.fileFailure = `Could not ${verb}: ${message(error)}`;
+  } finally {
+    busy = false;
+    drawOverlay();
+  }
+}
+
+/** The picker comes before the question: it needs the click or key that asked for it, and a dialog can outlast that. */
+const open = () =>
+  fileAction('open the file', async () => {
+    const doc = await openFile();
+    if (doc && mayDiscard()) openDoc(doc);
+  });
+
+const save = (as: boolean) =>
+  fileAction(`save ${file.name}`, async () => {
+    const saved = await saveFile(editor.state.doc.toString(), file, as);
+    if (!saved) return;
+    file = saved;
+    showFile();
+  });
+
+window.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (key === 'o' && !e.shiftKey) {
+    e.preventDefault();
+    void open();
+  } else if (key === 's') {
+    e.preventDefault();
+    void save(e.shiftKey);
+  }
+});
+
+const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+$('open').title = `Open (${mac ? '⌘O' : 'Ctrl+O'})`;
+$('save').title = `Save (${mac ? '⌘S' : 'Ctrl+S'}). Shift-click or press ${mac ? '⇧⌘S' : 'Shift+Ctrl+S'} to save as`;
+$('open').addEventListener('click', () => void open());
+$('save').addEventListener('click', (e) => void save(e.shiftKey));
 
 $('pages').addEventListener('click', (e) => {
   const point = pages.pointAt(e);
@@ -155,9 +236,6 @@ $('pages').addEventListener('click', (e) => {
   send({ kind: 'source', id: clicked, ...point });
 });
 
-$('download-md').addEventListener('click', () => {
-  download('document.md', new Blob([editor.state.doc.toString()], { type: 'text/markdown' }));
-});
 $('download-pdf').addEventListener('click', () => {
   pdfRequest = rev;
   send({ kind: 'pdf', rev });
@@ -201,7 +279,7 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
     case 'pdf':
       if (data.rev !== pdfRequest) break;
       pdfRequest = null;
-      download('document.pdf', new Blob([data.bytes], { type: 'application/pdf' }));
+      download(pdfName(file.name), new Blob([data.bytes], { type: 'application/pdf' }));
       break;
     case 'sourced':
       if (data.id === clicked && data.offset !== null) jumpTo(editor, data.offset);
@@ -217,3 +295,7 @@ worker.onerror = (e) => {
   last.failure = `Compiler failed to start: ${e.message}`;
   drawOverlay();
 };
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

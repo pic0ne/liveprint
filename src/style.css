@@ -75,14 +75,39 @@ body {
   background: var(--bar);
 }
 
+.doc {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  min-width: 0;
+}
+
 .wordmark {
   font-family: 'Libertinus Serif', serif;
   font-size: 22px;
   line-height: 1;
 }
 
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edited {
+  flex: none;
+  margin-left: -8px;
+  color: var(--muted);
+}
+
+.edited[hidden] {
+  display: none;
+}
+
 .actions {
   display: flex;
+  flex: none;
   gap: 8px;
 }
 
@@ -337,13 +362,24 @@ button:focus-visible,
     padding: 16px;
   }
 
+  /* Two rows: the document's name gets the width a phone cannot spare beside the buttons. */
   .bar {
     position: relative;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .doc,
+  .actions {
+    flex: 1 1 100%;
   }
 
   .actions {
     gap: 6px;
+  }
+
+  .actions .settings {
+    margin-right: auto;
   }
 
   .actions .long {

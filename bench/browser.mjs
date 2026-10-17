@@ -40,6 +40,11 @@ const blankVisible = `(() => {
   return [...pages.querySelectorAll('canvas')].filter((c) => !c.hasAttribute('width') && c.offsetTop < bottom && c.offsetTop + c.offsetHeight > top).length;
 })()`;
 
+// Leaving the typed page for the next spot passes its beforeunload warning.
+page.listeners.add(({ method }) => {
+  if (method === 'Page.javascriptDialogOpening') page.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => {});
+});
+
 async function load(spot) {
   await page.send('Page.navigate', { url });
   await until('pages drawn', () => evaluate(`document.querySelectorAll('#pages canvas[width]').length > 1`));
@@ -66,14 +71,16 @@ async function type(spot, onKey = async () => {}) {
 
 async function traced(work) {
   const events = [];
-  const done = new Promise((resolve) =>
-    page.listeners.add((m) => (m.method === 'Tracing.dataCollected' ? events.push(...m.params.value) : m.method === 'Tracing.tracingComplete' && resolve())),
-  );
+  let listener;
+  const done = new Promise((resolve) => {
+    listener = (m) => (m.method === 'Tracing.dataCollected' ? events.push(...m.params.value) : m.method === 'Tracing.tracingComplete' && resolve());
+    page.listeners.add(listener);
+  });
   await page.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink,cc,toplevel,v8', transferMode: 'ReportEvents' });
   await work();
   await page.send('Tracing.end');
   await done;
-  page.listeners.clear();
+  page.listeners.delete(listener);
   return events;
 }
 

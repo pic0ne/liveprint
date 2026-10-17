@@ -1,7 +1,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { commonmarkLanguage, markdown } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { StateEffect, StateField } from '@codemirror/state';
+import { EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, keymap } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { markdownExtensions } from './markdown/parser';
@@ -57,23 +57,34 @@ export function jumpTo(view: EditorView, offset: number): void {
   unmark = window.setTimeout(() => view.dispatch({ effects: markJump.of(null) }), 600);
 }
 
-/** `onCursor` runs on every change of the cursor or the text, since either can move where the cursor renders. */
-export function createEditor(parent: HTMLElement, doc: string, onDocChange: (doc: string) => void, onCursor: () => void): EditorView {
-  return new EditorView({
-    parent,
-    doc,
-    extensions: [
-      history(),
-      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-      markdown({ base: commonmarkLanguage, extensions: markdownExtensions }),
-      syntaxHighlighting(highlight),
-      EditorView.lineWrapping,
-      theme,
-      jumpedLine,
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) onDocChange(update.state.doc.toString());
-        if (update.docChanged || update.selectionSet) onCursor();
-      }),
-    ],
-  });
+/**
+ * `onCursor` runs on every change of the cursor or the text, since either can move where the cursor renders.
+ * `load` replaces the whole document, with a new undo history. It runs neither callback, so the caller passes the
+ * new text on itself.
+ */
+export function createEditor(
+  parent: HTMLElement,
+  doc: string,
+  onDocChange: (doc: string) => void,
+  onCursor: () => void,
+): { view: EditorView; load: (doc: string) => void } {
+  const extensions = [
+    history(),
+    keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+    markdown({ base: commonmarkLanguage, extensions: markdownExtensions }),
+    syntaxHighlighting(highlight),
+    EditorView.lineWrapping,
+    theme,
+    jumpedLine,
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) onDocChange(update.state.doc.toString());
+      if (update.docChanged || update.selectionSet) onCursor();
+    }),
+  ];
+  const view = new EditorView({ parent, doc, extensions });
+  const load = (text: string) => {
+    view.setState(EditorState.create({ doc: text, extensions }));
+    view.scrollDOM.scrollTop = 0;
+  };
+  return { view, load };
 }
