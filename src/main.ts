@@ -1,3 +1,4 @@
+import { convert } from './convert/toTypst';
 import { type Doc, documentTitle, imageNotice, isEdited, noticeText, pdfName, untitled } from './doc';
 import { addImages, WorkerImages } from './docImages';
 import { createEditor, jumpTo } from './editor';
@@ -284,6 +285,12 @@ function insertImages(files: File[], at: number | null): void {
   });
 }
 
+/**
+ * The images the text references now. The newest compile's list can be a keystroke or a paste behind, and saving by
+ * it would leave a just-pasted image off the disk while the text that names it is saved.
+ */
+const imagesIn = (text: string) => convert(text).images;
+
 const mayDiscard = () => !isEdited(editor.state.doc.toString(), file) || confirm(`Discard unsaved changes to ${file.name}?`);
 
 let busy = false;
@@ -311,7 +318,8 @@ const open = () =>
 
 const save = (as: boolean) =>
   fileAction(`save ${file.name}`, async () => {
-    const saved = await saveFile(editor.state.doc.toString(), file, images, referenced, as);
+    const text = editor.state.doc.toString();
+    const saved = await saveFile(text, file, images, imagesIn(text), as);
     if (!saved) return;
     file = saved;
     showFile();
@@ -321,7 +329,7 @@ const save = (as: boolean) =>
 
 const chooseImageFolder = () =>
   fileAction('read the folder', async () => {
-    const chosen = await chooseFolder(file, images, referenced);
+    const chosen = await chooseFolder(file, images, imagesIn(editor.state.doc.toString()));
     if (!chosen) return;
     file = chosen.file;
     keep();

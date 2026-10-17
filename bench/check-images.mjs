@@ -347,6 +347,21 @@ await key('s', { ctrl: true });
 await until('saved again', async () => !(await state()).edited);
 check('a later save knows the folder and asks for none', (await evaluate('__picker.folders')) === 2 && (await opfsRead('notes', 'notes.md')).endsWith(')\n\nMore.'));
 
+const beforeQuick = (await state()).text;
+await makeImage('quick.png', 'green', 3000, 2000);
+await paste('quick.png');
+await until('quick.png pasted', async () => (await state()).text.endsWith('![](quick.png)'));
+const compiling = await evaluate(`!__frames.some((f) => f.rev === __sent && f.final)`);
+await key('s', { ctrl: true });
+await until('saved right after the paste', async () => !(await state()).edited);
+await settled();
+const quick = await opfsRead('notes', 'quick.png', true);
+check('Save pressed while the paste still compiles writes the pasted image too', compiling && quick !== null, { compiling, written: quick?.length ?? null });
+await setText(beforeQuick);
+await key('s', { ctrl: true });
+await until('saved without quick.png', async () => !(await state()).edited);
+await settled();
+
 await evaluate(`Object.assign(__picker, { saveIn: 'elsewhere', save: 'copy.md' })`);
 await key('s', { ctrl: true, shift: true });
 await until('saved as elsewhere', async () => (await state()).name === 'copy.md');
