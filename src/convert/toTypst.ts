@@ -1,3 +1,4 @@
+import { type ImagePath, imagePath } from '../images';
 import { markdownParser } from '../markdown/parser';
 
 type SyntaxNode = ReturnType<typeof markdownParser.parse>['topNode'];
@@ -12,12 +13,22 @@ export interface Converted {
   typst: string;
   /** The Markdown text the Typst source shows, in document order. Generated text (bullets, numbers) and math have none. */
   pieces: TextPiece[];
+  /** Every local image the Markdown references, in document order, each once, whether it is available or not. */
+  images: ImagePath[];
+}
+
+/** A link reference definition's URL, and where it starts in the Markdown. */
+interface Ref {
+  url: string;
+  from: number;
 }
 
 interface Doc {
   src: string;
-  refs: ReadonlyMap<string, string>;
+  refs: ReadonlyMap<string, Ref>;
   pieces: TextPiece[];
+  available: ReadonlySet<ImagePath>;
+  images: Set<ImagePath>;
 }
 
 type Emit = (node: SyntaxNode, doc: Doc) => string;
@@ -200,6 +211,72 @@ const paragraphFallback: Emit = (node, doc) => textBlock(doc, node.from, node.to
 
 const drop: Emit = () => '';
 
+/** An image's URL as written, or as its reference defines it. Undefined for a reference with no definition. */
+function imageTarget(node: SyntaxNode, doc: Doc): Ref | undefined {
+  const url = node.getChild('URL');
+  if (url) {
+    const text = slice(url, doc);
+    return { url: text, from: url.from };
+  }
+  const label = node.getChild('LinkLabel');
+  const alt = named(node, 'LinkMark');
+  return doc.refs.get(normalizeLabel(label ? slice(label, doc) : `[${doc.src.slice(alt[0]?.to ?? node.from, alt[1]?.from ?? node.to)}]`));
+}
+
+/** The image's local path, noted as referenced, if it names one that is available. */
+function local(target: Ref, doc: Doc): ImagePath | null {
+  const path = imagePath(target.url);
+  if (!path) return null;
+  doc.images.add(path);
+  return doc.available.has(path) ? path : null;
+}
+
+/** Text as the reader would say it: marks, URLs and markup dropped, escapes and entities resolved. */
+function plain(node: SyntaxNode, doc: Doc, from: number, to: number): string {
+  let out = '';
+  let pos = from;
+  for (const child of childrenOf(node)) {
+    if (child.to <= from || child.from >= to) continue;
+    out += doc.src.slice(pos, child.from);
+    if (child.name === 'Escape') out += doc.src.slice(child.from + 1, child.to);
+    else if (child.name === 'Entity') out += entity(slice(child, doc));
+    else if (!MARKS.has(child.name) && child.name !== 'URL') out += plain(child, doc, child.from, child.to);
+    pos = child.to;
+  }
+  return out + doc.src.slice(pos, to);
+}
+
+/** The image, which shows no Markdown text: its alt text is for screen readers and the PDF's tags, not printed. */
+function image(node: SyntaxNode, doc: Doc, path: ImagePath): string {
+  const [open, close] = named(node, 'LinkMark');
+  const alt = softBreaks(plain(node, doc, open?.to ?? node.from, close?.from ?? node.to)).trim();
+  return `image(${str(`/images/${path}`)}, alt: ${str(alt)})`;
+}
+
+const PLACEHOLDER = 'block(stroke: (paint: luma(185), thickness: 0.5pt, dash: "dashed"), inset: 10pt, text(fill: luma(115))';
+
+/** An image that cannot be shown keeps its place: its alt text in a quiet frame, or its URL when it has no alt text. */
+function placeholder(node: SyntaxNode, doc: Doc, target: Ref): string {
+  const alt = inlineBetweenMarks(node, doc);
+  const body = alt !== '' ? alt : defuseLineStart(escapeText(shown(doc, target.from, target.url.trim())));
+  return `${PLACEHOLDER}[${body}])`;
+}
+
+/** A paragraph of nothing but images, each centred on its own line. Null for any other paragraph. */
+function blockImages(node: SyntaxNode, doc: Doc): string | null {
+  const kids = childrenOf(node);
+  const targets = kids.map((kid) => (kid.name === 'Image' ? imageTarget(kid, doc) : undefined));
+  const gaps = kids.map((kid, i) => doc.src.slice(i === 0 ? node.from : kids[i - 1]!.to, kid.from)).concat(doc.src.slice(kids.at(-1)?.to ?? node.from, node.to));
+  if (kids.length === 0 || targets.includes(undefined) || gaps.some((gap) => gap.trim() !== '')) return null;
+  return kids
+    .map((kid, i) => {
+      const target = targets[i]!;
+      const path = local(target, doc);
+      return `#align(center, ${path ? image(kid, doc, path) : placeholder(kid, doc, target)})`;
+    })
+    .join('\n');
+}
+
 const MARKS = new Set([
   'ListMark', 'QuoteMark', 'HeaderMark', 'EmphasisMark', 'CodeMark', 'CodeInfo', 'LinkMark', 'LinkLabel', 'LinkTitle',
   'TaskMarker', 'StrikethroughMark', 'TableDelimiter', 'MathMark',
@@ -207,7 +284,7 @@ const MARKS = new Set([
 
 const EMITTERS: Record<string, Emit> = {
   Document: (node, doc) => blocks(childrenOf(node), doc),
-  Paragraph: inline,
+  Paragraph: (node, doc) => blockImages(node, doc) ?? inline(node, doc),
   ATXHeading1: heading(1), ATXHeading2: heading(2), ATXHeading3: heading(3),
   ATXHeading4: heading(4), ATXHeading5: heading(5), ATXHeading6: heading(6),
   SetextHeading1: heading(1), SetextHeading2: heading(2),
@@ -256,9 +333,13 @@ const EMITTERS: Record<string, Emit> = {
     if (url) return link(slice(url, doc), inlineBetweenMarks(node, doc));
     const label = node.getChild('LinkLabel');
     const target = doc.refs.get(normalizeLabel(label ? slice(label, doc) : `[${doc.src.slice(node.from + 1, node.to - 1)}]`));
-    return target === undefined ? escapeText(verbatim(doc, node.from, node.to)) : link(target, inlineBetweenMarks(node, doc));
+    return target === undefined ? escapeText(verbatim(doc, node.from, node.to)) : link(target.url, inlineBetweenMarks(node, doc));
   },
-  Image: inlineBetweenMarks,
+  Image: (node, doc) => {
+    const target = imageTarget(node, doc);
+    const path = target && local(target, doc);
+    return path ? `#box(${image(node, doc, path)});` : inlineBetweenMarks(node, doc);
+  },
   URL: (node, doc) => link(slice(node, doc), escapeText(verbatim(doc, node.from, node.to))),
   Autolink: (node, doc) => {
     const url = node.getChild('URL');
@@ -278,8 +359,8 @@ function emit(node: SyntaxNode, doc: Doc): string {
   return emitter ? emitter(node, doc) : paragraphFallback(node, doc);
 }
 
-function collectRefs(root: SyntaxNode, src: string): Map<string, string> {
-  const refs = new Map<string, string>();
+function collectRefs(root: SyntaxNode, src: string): Map<string, Ref> {
+  const refs = new Map<string, Ref>();
   const defs: SyntaxNode[] = [];
   root.cursor().iterate((n) => {
     if (n.name === 'LinkReference') defs.push(n.node);
@@ -289,18 +370,20 @@ function collectRefs(root: SyntaxNode, src: string): Map<string, string> {
     const url = def.getChild('URL');
     if (!label || !url) continue;
     const key = normalizeLabel(src.slice(label.from, label.to));
-    if (!refs.has(key)) refs.set(key, src.slice(url.from, url.to).replace(/^<|>$/g, ''));
+    const text = src.slice(url.from, url.to);
+    if (!refs.has(key)) refs.set(key, { url: text.replace(/^<|>$/g, ''), from: url.from + (text.startsWith('<') ? 1 : 0) });
   }
   return refs;
 }
 
 /**
- * Markdown to the Typst document body, and the Markdown text it shows. Pure and total: every input yields Typst
- * that parses. Piece offsets count in the text after `\r\n` became `\n`; the editor's text never has `\r`.
+ * Markdown to the Typst document body, the Markdown text it shows, and the local images it references. Images in
+ * `available` are typeset from `/images/<path>`. Pure and total: every input yields Typst that parses. Piece offsets
+ * count in the text after `\r\n` became `\n`; the editor's text never has `\r`.
  */
-export function convert(markdown: string): Converted {
+export function convert(markdown: string, available: ReadonlySet<ImagePath> = new Set()): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [] };
-  return { typst: `${emit(root, doc)}\n`, pieces: doc.pieces };
+  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set() };
+  return { typst: `${emit(root, doc)}\n`, pieces: doc.pieces, images: [...doc.images] };
 }

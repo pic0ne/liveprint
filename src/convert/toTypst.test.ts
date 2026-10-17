@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import sample from '../sample.md?raw';
+import type { ImagePath } from '../images';
 import { convert, type TextPiece } from './toTypst';
 
 const cases: [string, string, string][] = [
@@ -60,6 +61,50 @@ const cases: [string, string, string][] = [
 describe('convert: Typst source', () => {
   test.each(cases)('%s', (_, markdown, typst) => {
     expect(convert(markdown).typst).toBe(`${typst}\n`);
+  });
+});
+
+const FRAME = '#align(center, block(stroke: (paint: luma(185), thickness: 0.5pt, dash: "dashed"), inset: 10pt, text(fill: luma(115))';
+const available = new Set(['cat.png', 'figures/plot.svg', 'my cat.png'] as ImagePath[]);
+
+const imageCases: [string, string, string][] = [
+  ['an image alone in its paragraph is a centred block', '![A *grey* cat](cat.png)', '#align(center, image("/images/cat.png", alt: "A grey cat"))'],
+  [
+    'images alone in one paragraph each get a line, whatever the whitespace between them',
+    '![a](cat.png) ![b](./figures/plot.svg)\n![](<my cat.png> "title")',
+    '#align(center, image("/images/cat.png", alt: "a"))\n#align(center, image("/images/figures/plot.svg", alt: "b"))\n#align(center, image("/images/my cat.png", alt: ""))',
+  ],
+  ['an image inside text is boxed inline', 'Look: ![cat](cat.png) here.', 'Look: #box(image("/images/cat.png", alt: "cat")); here.'],
+  ['an image inside a link is boxed inline', '[![cat](cat.png)](https://x.org)', '#link("https://x.org")[#box(image("/images/cat.png", alt: "cat"));];'],
+  ['a reference image resolves through its definition', '![cat][c]\n\n[c]: <cat.png>', '#align(center, image("/images/cat.png", alt: "cat"))'],
+  [
+    'alt text is plain: markup, URLs, escapes and entities resolved, quotes escaped',
+    '![a `b` [c](http://u) \\* &amp; "q"\nline](cat.png)',
+    '#align(center, image("/images/cat.png", alt: "a b c * & \\"q\\" line"))',
+  ],
+  ['a missing block image is a quiet frame holding its alt text', '![Missing *one*](gone.png)', `${FRAME}[Missing #emph[one];]))`],
+  ['a remote block image is a frame too, with its URL when it has no alt text', '![](https://x.org/a.png)', `${FRAME}[https:\\/\\/x.org\\/a.png]))`],
+  ['a missing inline image keeps its alt text', 'See ![the plot](gone.png).', 'See the plot.'],
+  ['an unresolved reference image stays text', '![nope]', 'nope'],
+  ['an image in a heading is inline', '# Logo ![l](cat.png)', '#heading(level: 1)[Logo #box(image("/images/cat.png", alt: "l"));]'],
+];
+
+describe('convert: images', () => {
+  test.each(imageCases)('%s', (_, markdown, typst) => {
+    expect(convert(markdown, available).typst).toBe(`${typst}\n`);
+  });
+
+  test('every local image is listed once, in order, available or not; remote ones are not', () => {
+    const markdown = '![](b.png) ![](https://x/y.png)\n\ntext ![](a.png) ![](./b.png) ![][r] ![](../out.png)\n\n[r]: figures/plot.svg';
+    expect(convert(markdown, available).images).toEqual(['b.png', 'a.png', 'figures/plot.svg']);
+  });
+
+  test('a shown image adds no text pieces; a frame shows its alt text or URL where they are typed', () => {
+    expect(convert('a ![cat](cat.png) b', available).pieces).toEqual([{ from: 0, text: 'a ' }, { from: 17, text: ' b' }]);
+    expect(convert('![cat](cat.png)', available).pieces).toEqual([]);
+    expect(convert('![lost](x.png)', available).pieces).toEqual([{ from: 2, text: 'lost' }]);
+    expect(convert('![](http://u/x.png)', available).pieces).toEqual([{ from: 4, text: 'http://u/x.png' }]);
+    expect(convert('![][r]\n\n[r]: <gone.png>', available).pieces).toEqual([{ from: 14, text: 'gone.png' }]);
   });
 });
 
