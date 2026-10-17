@@ -4,7 +4,7 @@
 
 Write Markdown on the left and see the real PDF pages on the right while you type. The preview is the typeset document itself, not an HTML approximation: Typst compiles it in your browser, and **Download .pdf** gives you the same pages you see.
 
-Everything runs on the client. There is no server.
+Everything runs on the client. There is no server. After the first visit the app works offline, and it opens and saves real `.md` files on your disk.
 
 ## Speed
 
@@ -89,6 +89,56 @@ Book uses only the fonts that load at start-up. Paper needs 2.2 MB of fonts and 
 
 Typing latency did not change. Over three alternating runs of `npm run bench:browser`, typing in the title measured 40.1 to 42.1 ms at p50 before page settings, with the old 6-page layout, and 40.8 to 42.2 ms after, in Book. The reflowing edit measured 23.6 to 30.0 ms before and 23.8 to 30.3 ms after.
 
+## Files
+
+**Open** (Ctrl+O, or Cmd+O on a Mac) reads a Markdown file. **Save** (Ctrl+S) writes it back to the same file. **Shift+Ctrl+S**, or Shift-click on **Save**, saves it under a new name. You can also drop a `.md`, `.markdown` or `.txt` file anywhere on the app to open it. The bar shows the file's name, and **Edited** while the editor's text differs from what was last opened or saved. Undoing back to that text clears **Edited** again. **Download .pdf** names the PDF after the file, so `notes.md` becomes `notes.pdf`.
+
+In Chrome and Edge, liveprint uses the File System Access API and keeps the file handle, so **Save** writes to the file you opened without asking again. Firefox and Safari do not have the API. There, **Open** uses the browser's file dialog and **Save** downloads the file under its name.
+
+Opening another file while there are unsaved changes asks first. So does closing or reloading the tab.
+
+liveprint restores the last document when you come back: its text, its name, whether it was edited, and in Chrome its file handle. It keeps a copy in the browser's IndexedDB while you type, one write at a time. This protects against the losses a leave-page warning cannot catch, such as a crash, a closed laptop or a tab the browser discarded. The copy stays in this browser only, so **Edited** still means the file on disk is behind. After a reload, Chrome may ask once for permission to write to the file again.
+
+To check opening, saving, restoring and dropping in headless Chrome, with the File System Access API and without it, run:
+
+```bash
+npm run check:files
+```
+
+CDP cannot answer Chrome's file pickers, so with the API the check returns files from the origin private file system in place of the picker. Reading, writing and reading back are real. Without the API, the check chooses a real file through the file input and compares the bytes of the real download.
+
+## Offline
+
+A service worker caches the app after the first visit: the page, the scripts, both WebAssembly files, the fonts used at start-up and the mitex package, about 33 MB in all. A theme's fonts are cached the first time you choose that theme. Later visits make no requests at all, and the app works with no network. You can also install it as an app from the browser's address bar.
+
+The service worker is written by hand in [`src/sw.ts`](src/sw.ts), with no plugin and no new dependency. A small Vite plugin, [`build/serviceWorker.ts`](build/serviceWorker.ts), lists the built files and adds a hash of their contents to `sw.js`. Any change to the build changes `sw.js`, so the browser installs the new version on the next visit and deletes the old cache. The page you have open keeps running the version it started with. The new version shows on the visit after that. The service worker registers only after the first pages show, so on a first visit it does not download the large files while the page is still downloading them.
+
+Time from navigation to the first page, in headless Chrome, two runs per cell except three for the loopback runs after the change. Each run is a cold load with all site data cleared, then three reloads:
+
+| Load | Before, 50 Mbit/s | After, 50 Mbit/s | Before, loopback | After, loopback |
+|---|---|---|---|---|
+| First visit | 7.36–7.41 s | 7.38–7.43 s | 1.14 s | 1.10–1.16 s |
+| Second visit | 0.99–1.01 s | 1.06–1.09 s | 0.74–0.75 s | 1.08–1.09 s |
+| Third and later | 0.99–1.01 s | 0.72–0.77 s | 0.72–0.80 s | 0.72–0.77 s |
+| Offline | fails | 0.75 s | fails | 0.75 s |
+
+The throttled runs add 40 ms of latency. The offline row is one load with the server stopped, so throttling does not apply to it. `vite preview` does not compress, so a first visit transfers 32.9 MB, where a host that gzips would send about 13 MB.
+
+What these numbers mean:
+
+- Before, every later visit asked the server about each of 18 files, and those round trips set the warm time on a network. After, the service worker answers all 20 requests and nothing goes over the network.
+- The second visit is no faster than before, and on loopback it is about 330 ms slower. The extra time is in the first compile of the document, which takes about 770 ms on that visit and about 420 ms on later ones. The likely cause, not yet confirmed by a profile, is that the second visit is the first to load the compiler from the service worker's copy. Chrome has no compiled code stored for that copy yet, so it compiles all 28 MB again and stores the result. Before this change, the browser's HTTP cache kept the code compiled on the first visit.
+- From the third visit on, the time is the same on any network. About 420 ms of it is the first full compile of the document, which is the limit now.
+
+To measure it, run:
+
+```bash
+npm run build
+node bench/load.mjs --runs 2 --warm 3 --throttle 50 --offline
+```
+
+Without `--throttle` the bench runs over loopback. `--offline` stops the server at the end and loads the page once more. The Chrome profile goes in the system temp folder. If that folder is a small `tmpfs`, Chrome can fail to store the 28 MB WebAssembly file, and the bench prints `service worker: none`. Set `TMPDIR` to a folder on disk to avoid that.
+
 ## Run it
 
 ```bash
@@ -103,19 +153,24 @@ Other scripts:
 - `npm run bench` compares compile cost of cmarker and the JavaScript converter in Node.
 - `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, and `--switch` measures choosing a theme.
 - `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
+- `npm run check:files` checks opening, saving, restoring and dropping files in headless Chrome.
+- `npm run bench:load` measures the time to the first page, cold and warm, in headless Chrome.
 - `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
 ## Status
 
 The pipeline works end to end, the speed is measured, and the editor and the preview link both ways. Not built yet:
 
-- Offline support and opening and saving local files.
 - Images. Image syntax renders its alt text for now.
 - Text selection in the preview.
 
 Known limits:
 
-- The compiler WebAssembly is 28 MB, or 10.8 MB gzipped, so the first load is slow until a service worker caches it.
+- The compiler WebAssembly is 28 MB, or 10.8 MB gzipped, so the first visit is slow. Later visits load it from the service worker's cache.
+- After an update, the theme fonts cached before it are downloaded again the next time you choose that theme, and until then they are not available offline.
+- Only one document is restored. If two tabs are open, the one that wrote last is the one that comes back.
+- If a file changes on disk while it is open in liveprint, liveprint does not notice, and **Save** overwrites the change.
+- Only Chrome has been tested. The Firefox and Safari paths for opening and saving are tested in Chrome with the API removed.
 - Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
 - Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking measures body text with the math font's upright letters, which have the same design, and the menu sets the name Paper in the math font.
 - If a theme's fonts fail to download, the preview stays in the previous theme and the menu keeps showing the chosen theme as loading. Choosing it again retries the download.
