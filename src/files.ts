@@ -7,14 +7,16 @@ interface FilePickerType {
   accept: Record<string, string[]>;
 }
 type Permission = 'granted' | 'denied' | 'prompt';
+type Mode = { mode: 'read' | 'readwrite' };
 declare global {
   interface Window {
     showOpenFilePicker?(options: { types: FilePickerType[] }): Promise<FileSystemFileHandle[]>;
     showSaveFilePicker?(options: { suggestedName: string; types: FilePickerType[]; startIn?: FileSystemHandle }): Promise<FileSystemFileHandle>;
+    showDirectoryPicker?(options: { mode: 'readwrite'; startIn?: FileSystemHandle }): Promise<FileSystemDirectoryHandle>;
   }
   interface FileSystemHandle {
-    queryPermission?(descriptor: { mode: 'readwrite' }): Promise<Permission>;
-    requestPermission?(descriptor: { mode: 'readwrite' }): Promise<Permission>;
+    queryPermission?(descriptor: Mode): Promise<Permission>;
+    requestPermission?(descriptor: Mode): Promise<Permission>;
   }
   interface DataTransferItem {
     getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
@@ -67,36 +69,166 @@ export async function openFile(): Promise<Doc | null> {
   return file ? readCopy(file) : null;
 }
 
-async function mayWrite(handle: FileSystemFileHandle): Promise<boolean> {
-  if (!handle.queryPermission || !handle.requestPermission) return true;
-  if ((await handle.queryPermission({ mode: 'readwrite' })) === 'granted') return true;
-  return (await handle.requestPermission({ mode: 'readwrite' })) === 'granted';
+const allowed = async (handle: FileSystemHandle, mode: Mode['mode']) => !handle.queryPermission || (await handle.queryPermission({ mode })) === 'granted';
+
+/** Asks for write access when it is not granted yet. The ask needs the click or key that started the save. */
+async function mayWrite(handle: FileSystemHandle): Promise<boolean> {
+  if (await allowed(handle, 'readwrite')) return true;
+  return (await handle.requestPermission?.({ mode: 'readwrite' })) === 'granted';
 }
 
-async function write(handle: FileSystemFileHandle, text: string, file: DocFile): Promise<DocFile> {
+async function writeFile(handle: FileSystemFileHandle, data: string | Blob): Promise<void> {
   const writable = await handle.createWritable();
-  await writable.write(text);
+  await writable.write(data);
   await writable.close();
-  return handle === file.handle ? { ...file, saved: text } : { name: handle.name, handle, saved: text, ...NO_IMAGES };
 }
 
-/**
- * Writes `text` back to the file it came from. Without a writable handle, or with `as`, asks where to save it first;
- * without the API, downloads it under its current name. Returns where it now lives, or null when the user cancels.
- */
-export async function saveFile(text: string, file: DocFile, as: boolean): Promise<DocFile | null> {
-  if (!as && file.handle && (await mayWrite(file.handle))) return write(file.handle, text, file);
-  if (!window.showSaveFilePicker) {
-    download(file.name, new Blob([text], { type: 'text/markdown' }));
-    return { ...file, saved: text };
+const notFound = (error: unknown) => error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'TypeMismatchError');
+
+/** The folder that holds `path`, made when `create`. */
+async function folderOf(folder: FileSystemDirectoryHandle, path: ImagePath, create: boolean): Promise<{ dir: FileSystemDirectoryHandle; name: string }> {
+  const segments = path.split('/');
+  const name = segments.pop()!;
+  let dir = folder;
+  for (const segment of segments) dir = await dir.getDirectoryHandle(segment, { create });
+  return { dir, name };
+}
+
+/** The images at `paths` under `folder` that are there. */
+export async function readImages(folder: FileSystemDirectoryHandle, paths: readonly ImagePath[]): Promise<Map<ImagePath, File>> {
+  const found = new Map<ImagePath, File>();
+  for (const path of paths) {
+    try {
+      const { dir, name } = await folderOf(folder, path, false);
+      found.set(path, await (await dir.getFileHandle(name)).getFile());
+    } catch (error) {
+      if (!notFound(error)) throw error;
+    }
   }
+  return found;
+}
+
+/** Like readImages, but finds nothing unless reading the folder is allowed already, since it never asks. */
+export async function imagesAllowed(folder: FileSystemDirectoryHandle, paths: readonly ImagePath[]): Promise<Map<ImagePath, File>> {
+  return (await allowed(folder, 'read')) ? readImages(folder, paths) : new Map();
+}
+
+async function writeImages(folder: FileSystemDirectoryHandle, paths: readonly ImagePath[], images: ReadonlyMap<ImagePath, Blob>): Promise<void> {
+  for (const path of paths) {
+    const { dir, name } = await folderOf(folder, path, true);
+    await writeFile(await dir.getFileHandle(name, { create: true }), images.get(path)!);
+  }
+}
+
+/** Asks for the folder that holds `file`, or with no file, any folder. Null when the user cancels. */
+async function pickFolder(file: DocFile): Promise<FileSystemDirectoryHandle | null> {
   try {
-    const handle = await window.showSaveFilePicker({ suggestedName: file.name, types: MARKDOWN, ...(file.handle && { startIn: file.handle }) });
-    return await write(handle, text, file);
+    const folder = await window.showDirectoryPicker!({ mode: 'readwrite', ...(file.handle && { startIn: file.handle }) });
+    if (file.handle && (await folder.resolve(file.handle))?.length !== 1) throw new Error(`Choose the folder that contains ${file.name}`);
+    return folder;
   } catch (error) {
     if (cancelled(error)) return null;
     throw error;
   }
+}
+
+/** The document's images that have bytes and are not beside its file yet, in the order the Markdown names them. */
+const unsavedImages = (file: DocFile, images: ReadonlyMap<ImagePath, Blob>, referenced: readonly ImagePath[]) =>
+  referenced.filter((path) => images.has(path) && !file.savedImages.has(path));
+
+const withSaved = (file: DocFile, paths: Iterable<ImagePath>): DocFile => ({ ...file, savedImages: new Set([...file.savedImages, ...paths]) });
+
+/**
+ * Writes the folder the file is in, when liveprint has it or the user chooses it now, so that unsaved images can be
+ * written beside it. Asking for the folder takes the click or key of the save, so it comes before any other ask:
+ * one grant on the folder covers the file too. Null when there is nothing to write or no folder to write to.
+ */
+async function folderToWrite(file: DocFile, unsaved: readonly ImagePath[]): Promise<FileSystemDirectoryHandle | null> {
+  if (unsaved.length === 0) return null;
+  if (file.folder) return (await mayWrite(file.folder)) ? file.folder : null;
+  return window.showDirectoryPicker ? pickFolder(file) : null;
+}
+
+/**
+ * Writes `text` back to the file it came from, and the referenced images not yet beside it into its folder. Without a
+ * writable handle, or with `as`, asks where to save it first; without the API, downloads it and those images under
+ * their names. Returns where it now lives, or null when the user cancels.
+ */
+export async function saveFile(
+  text: string,
+  file: DocFile,
+  images: ReadonlyMap<ImagePath, Blob>,
+  referenced: readonly ImagePath[],
+  as: boolean,
+): Promise<DocFile | null> {
+  const unsaved = unsavedImages(file, images, referenced);
+  if (!as && file.handle) {
+    const folder = await folderToWrite(file, unsaved);
+    if (await mayWrite(file.handle)) {
+      await writeFile(file.handle, text);
+      if (folder) await writeImages(folder, unsaved, images);
+      return withSaved({ ...file, saved: text, folder: folder ?? file.folder }, folder ? unsaved : []);
+    }
+  }
+  if (!window.showSaveFilePicker) {
+    download(file.name, new Blob([text], { type: 'text/markdown' }));
+    for (const path of unsaved) download(path.split('/').pop()!, images.get(path)!);
+    return withSaved({ ...file, saved: text }, unsaved);
+  }
+  let handle: FileSystemFileHandle;
+  try {
+    handle = await window.showSaveFilePicker({ suggestedName: file.name, types: MARKDOWN, ...(file.handle && { startIn: file.handle }) });
+  } catch (error) {
+    if (cancelled(error)) return null;
+    throw error;
+  }
+  await writeFile(handle, text);
+  // The picker took the click, so the folder is kept only if the new file is right in it and writing it is allowed.
+  const folder = file.folder && (await file.folder.resolve(handle))?.length === 1 ? file.folder : null;
+  const saved: DocFile = { name: handle.name, handle, saved: text, folder, savedImages: folder ? file.savedImages : new Set() };
+  if (!folder || !(await allowed(folder, 'readwrite'))) return saved;
+  const toWrite = unsavedImages(saved, images, referenced);
+  await writeImages(folder, toWrite, images);
+  return withSaved(saved, toWrite);
+}
+
+/** Without the API: every file in a folder the user chooses, by its path inside that folder. Null when cancelled. */
+function pickFolderFiles(): Promise<Map<string, File> | null> {
+  const input = Object.assign(document.createElement('input'), { type: 'file', webkitdirectory: true });
+  return new Promise((resolve) => {
+    input.addEventListener('change', () =>
+      resolve(new Map([...(input.files ?? [])].map((f) => [f.webkitRelativePath.split('/').slice(1).join('/'), f]))),
+    );
+    input.addEventListener('cancel', () => resolve(null));
+    input.click();
+  });
+}
+
+export interface Chosen {
+  file: DocFile;
+  images: ReadonlyMap<ImagePath, Blob>;
+}
+
+/**
+ * Asks for the folder of the file, reads the referenced images the document lacks from it, and writes the ones not
+ * yet beside the file into it. A folder chosen before that lost its grant after a reload is asked for again instead
+ * of picked. Without the API, the folder is read through a file input, and nothing is written. Null when cancelled.
+ */
+export async function chooseFolder(file: DocFile, images: ReadonlyMap<ImagePath, Blob>, referenced: readonly ImagePath[]): Promise<Chosen | null> {
+  const lacking = referenced.filter((path) => !images.has(path));
+  if (!window.showDirectoryPicker) {
+    const files = await pickFolderFiles();
+    if (!files) return null;
+    const found = new Map(lacking.flatMap((path) => (files.has(path) ? [[path, files.get(path)!] as const] : [])));
+    return { file: withSaved(file, found.keys()), images: new Map([...images, ...found]) };
+  }
+  const folder = file.folder && (await mayWrite(file.folder)) ? file.folder : await pickFolder(file);
+  if (!folder) return null;
+  const found = await readImages(folder, lacking);
+  // An untitled document is not in the folder yet, so its images are written only when it is saved there.
+  const unsaved = file.handle ? unsavedImages(file, images, referenced) : [];
+  await writeImages(folder, unsaved, images);
+  return { file: withSaved({ ...file, folder }, [...found.keys(), ...unsaved]), images: new Map([...images, ...found]) };
 }
 
 /**

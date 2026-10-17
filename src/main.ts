@@ -1,7 +1,7 @@
-import { type Doc, documentTitle, isEdited, pdfName, untitled } from './doc';
+import { type Doc, documentTitle, imageNotice, isEdited, noticeText, pdfName, untitled } from './doc';
 import { addImages, WorkerImages } from './docImages';
 import { createEditor, jumpTo } from './editor';
-import { download, droppedFile, openFile, saveFile } from './files';
+import { chooseFolder, download, droppedFile, imagesAllowed, openFile, saveFile } from './files';
 import { IMAGE_TYPE_NAMES, IMAGE_TYPES, type ImagePath } from './images';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
@@ -148,6 +148,10 @@ const start: Doc = (await restoring) ?? untitled(sample);
 performance.mark('liveprint:restored');
 let file = start.file;
 let images = start.images;
+/** The local images the newest compile's Markdown references, which the bar's notice counts. */
+let referenced: readonly ImagePath[] = [];
+/** Referenced images already looked for in the document's folder. */
+let looked = new Set<ImagePath>();
 
 const { view: editor, load } = createEditor(
   $('editor'),
@@ -181,6 +185,31 @@ function showFile(text = editor.state.doc.toString()): void {
   document.title = documentTitle(file.name, edited);
 }
 showFile();
+
+const notice = $('image-notice');
+const noticeLine = $('image-notice-text');
+
+function showNotice(): void {
+  const text = noticeText(imageNotice(referenced, images, file), file.name);
+  noticeLine.textContent = text;
+  notice.hidden = text === '';
+}
+
+/**
+ * A referenced image the document lacks is read from its folder when reading that is allowed already, once per
+ * image, so that typing ![](plot.png) shows plot.png from beside the file.
+ */
+async function lookInFolder(): Promise<void> {
+  const folder = file.folder;
+  const wanted = referenced.filter((path) => !images.has(path) && !looked.has(path));
+  if (!folder || wanted.length === 0) return;
+  for (const path of wanted) looked.add(path);
+  const found = await imagesAllowed(folder, wanted);
+  if (found.size === 0 || file.folder !== folder) return;
+  file = { ...file, savedImages: new Set([...file.savedImages, ...found.keys()]) };
+  keep();
+  await setImages(new Map([...images, ...found]));
+}
 
 // A write started as the page unloads can be aborted with it, so the copy is kept current all along instead: one
 // write at a time, and the newest document written as soon as the last one ends.
@@ -219,6 +248,7 @@ function changed(markdown: string): void {
 /** The worker gets the images before any edit that references them. */
 async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   images = next;
+  showNotice();
   keepImages(next).catch((error) => {
     last.fileFailure = `Could not keep the images of ${file.name} in this browser: ${message(error)}`;
     drawOverlay();
@@ -227,9 +257,11 @@ async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
 }
 
 async function openDoc(doc: Doc): Promise<void> {
+  file = doc.file;
+  referenced = [];
+  looked = new Set();
   await setImages(doc.images);
   load(doc.text);
-  file = doc.file;
   $('pages').scrollTop = 0;
   changed(doc.text);
 }
@@ -279,11 +311,21 @@ const open = () =>
 
 const save = (as: boolean) =>
   fileAction(`save ${file.name}`, async () => {
-    const saved = await saveFile(editor.state.doc.toString(), file, as);
+    const saved = await saveFile(editor.state.doc.toString(), file, images, referenced, as);
     if (!saved) return;
     file = saved;
     showFile();
+    showNotice();
     keep();
+  });
+
+const chooseImageFolder = () =>
+  fileAction('read the folder', async () => {
+    const chosen = await chooseFolder(file, images, referenced);
+    if (!chosen) return;
+    file = chosen.file;
+    keep();
+    await setImages(chosen.images);
   });
 
 window.addEventListener('keydown', (e) => {
@@ -321,6 +363,7 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 $('open').title = `Open (${mac ? '⌘O' : 'Ctrl+O'})`;
 $('save').title = `Save (${mac ? '⌘S' : 'Ctrl+S'}). Shift-click or press ${mac ? '⇧⌘S' : 'Shift+Ctrl+S'} to save as`;
 $('open').addEventListener('click', () => void open());
+$('choose-folder').addEventListener('click', () => void chooseImageFolder());
 $('save').addEventListener('click', (e) => void save(e.shiftKey));
 
 $('pages').addEventListener('click', (e) => {
@@ -343,6 +386,11 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       break;
     case 'pages': {
       pages.show(data.sizes, data.bitmaps);
+      if (data.final && data.rev === rev) {
+        referenced = data.images;
+        showNotice();
+        void lookInFolder().catch(() => {});
+      }
       registerServiceWorker();
       menu.showing(data.settings.theme);
       if (data.final && !(located?.rev === data.rev && sameSettings(located.settings, data.settings))) {

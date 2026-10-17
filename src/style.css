@@ -17,6 +17,7 @@
   --selection: #d6dde8;
   --button: #dcd9d2;
   --button-hover: #cfccc4;
+  --button-quiet: #e3e1dc;
   --overlay: #f7f6f3;
   --failure: #9a3412;
   --accent: #2563d0;
@@ -39,6 +40,7 @@
     --selection: #3a4250;
     --button: #34332f;
     --button-hover: #403e3a;
+  --button-quiet: #282725;
     --overlay: #232220;
     --failure: #f0a07a;
     --accent: #3b7be8;
@@ -103,6 +105,31 @@ body {
 
 .edited[hidden] {
   display: none;
+}
+
+/* Says what Edited cannot: images the preview lacks, or ones not beside the saved file. No louder than Edited. */
+.image-notice {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.image-notice[hidden] {
+  display: none;
+}
+
+button.quiet {
+  padding: 2px 8px;
+  color: inherit;
+  background: var(--button-quiet);
+}
+
+button.quiet:hover {
+  color: var(--ink);
+  background: var(--button);
 }
 
 .actions {
@@ -372,6 +399,16 @@ button:focus-visible,
   .doc,
   .actions {
     flex: 1 1 100%;
+  }
+
+  /* No width to spare beside the name, so the notice takes a line of its own while it shows. */
+  .doc {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .image-notice {
+    flex-basis: 100%;
   }
 
   .actions {

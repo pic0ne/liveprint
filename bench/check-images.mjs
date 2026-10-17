@@ -7,7 +7,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
+
+const { values: args } = parseArgs({ options: { shots: { type: 'string' } } });
 
 const J = JSON.stringify;
 const dir = mkdtempSync(join(tmpdir(), 'liveprint-images-'));
@@ -72,6 +75,16 @@ const WATCH_WORKER = `
   };`;
 await page.send('Page.addScriptToEvaluateOnNewDocument', { source: WATCH_WORKER });
 
+/** Pickers answered from folders of the origin private file system: `__picker.folder` is the user's chosen one. */
+const STUB_PICKERS = `
+  window.__picker = { open: null, folder: 'notes', saveIn: 'notes', save: null, opened: 0, saved: 0, folders: 0 };
+  const opfsFolder = async (name) => (await navigator.storage.getDirectory()).getDirectoryHandle(name, { create: true });
+  window.showOpenFilePicker = async () => (__picker.opened++, [await (await opfsFolder(__picker.saveIn)).getFileHandle(__picker.open)]);
+  window.showSaveFilePicker = async () => (__picker.saved++, (await opfsFolder(__picker.saveIn)).getFileHandle(__picker.save, { create: true }));
+  window.showDirectoryPicker = async () => (__picker.folders++, opfsFolder(__picker.folder));`;
+const stub = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: STUB_PICKERS });
+const NO_PICKERS = ['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker'].map((name) => `delete window.${name}; delete Window.prototype.${name};`).join(' ');
+
 const view = `document.querySelector('.cm-content').cmTile.view`;
 const state = () =>
   evaluate(`({
@@ -118,6 +131,46 @@ const makeImage = (name, colour, width, height, type = 'image/png') =>
 const imageBytes = async (name) =>
   Buffer.from(await evaluate(`(async () => { const b = new Uint8Array(await __images[${J(name)}].arrayBuffer()); let s = ''; for (const x of b) s += String.fromCharCode(x); return btoa(s); })()`), 'base64');
 
+const opfsWrite = (folder, name, data) =>
+  evaluate(`(async () => {
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(${J(folder)}, { create: true });
+    const w = await (await dir.getFileHandle(${J(name)}, { create: true })).createWritable();
+    await w.write(${data.startsWith('__images') ? data : J(data)});
+    await w.close();
+  })()`);
+/** A file of an OPFS folder, as text, or as base64 with `binary`; null when it is not there. */
+const opfsRead = (folder, name, binary = false) =>
+  evaluate(`(async () => {
+    try {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(${J(folder)});
+      const file = await (await dir.getFileHandle(${J(name)})).getFile();
+      if (!${binary}) return await file.text();
+      let s = '';
+      for (const x of new Uint8Array(await file.arrayBuffer())) s += String.fromCharCode(x);
+      return btoa(s);
+    } catch { return null; }
+  })()`);
+
+async function key(k, { ctrl = false, shift = false } = {}) {
+  const modifiers = (ctrl ? 2 : 0) | (shift ? 8 : 0);
+  const event = { modifiers, key: shift ? k.toUpperCase() : k, code: `Key${k.toUpperCase()}`, windowsVirtualKeyCode: k.toUpperCase().charCodeAt(0) };
+  await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
+}
+
+async function type(text) {
+  for (const ch of text) {
+    const [key, typed] = ch === '\n' ? ['Enter', '\r'] : [ch, ch];
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key, text: typed, unmodifiedText: typed, windowsVirtualKeyCode: ch === '\n' ? 13 : 0 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key });
+  }
+}
+
+async function clickAt({ x, y }) {
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+}
+const centreOf = (selector) => evaluate(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+
 const paste = (...names) =>
   evaluate(`(() => {
     const data = new DataTransfer();
@@ -130,9 +183,14 @@ async function drop(paths, at) {
   for (const type of ['dragEnter', 'dragOver', 'drop']) await page.send('Input.dispatchDragEvent', { type, ...at, data });
 }
 
-/** The first frame of the newest edit that redrew page `index`, and whether it was final. */
+/** Frames before this are older than the action a check is about. A reload starts the count again. */
+const markFrames = () => evaluate(`window.__since = __frames.length`);
+/** The first frame of the newest edit since the mark that redrew page `index`, and whether it was final. */
 const firstFrame = (index = 0) =>
-  evaluate(`(() => { const f = __frames.find((f) => f.rev === __sent && f.pages.some((p) => p.index === ${index})); return f && { final: f.final, images: f.images, page: f.pages.find((p) => p.index === ${index}) }; })()`);
+  evaluate(`(() => {
+    const f = __frames.find((f, i) => i >= (window.__since ?? 0) && f.rev === __sent && f.pages.some((p) => p.index === ${index}));
+    return f && { final: f.final, images: f.images, page: f.pages.find((p) => p.index === ${index}) };
+  })()`);
 
 /** A box in bitmap pixels as fractions of the page, rounded. */
 const fractions = ({ width, height }, [l, t, r, b]) => [l / width, t / height, r / width, b / height].map((v) => Math.round(v * 1000) / 1000);
@@ -152,6 +210,7 @@ await load(() => page.send('Page.reload'));
 await setText('# Images\n\nBefore the image.\n\n');
 await settled();
 await makeImage('image.png', 'magenta', 200, 100);
+await markFrames();
 await paste('image.png');
 await until('pasted', async () => (await state()).text.includes('!['));
 let s = await state();
@@ -172,6 +231,7 @@ s = await state();
 check('pasting the same bytes again reuses image.png', s.text.endsWith('![](image.png)\n\n![](image.png)'), s.text);
 await makeImage('image.png', 'cyan', 200, 100);
 await setText(`${s.text}\n\n`);
+await markFrames();
 await paste('image.png');
 await until('pasted other bytes', async () => (await state()).text.split('![').length === 4);
 s = await state();
@@ -182,6 +242,7 @@ check('and show in their own colour', first?.page.found.cyan?.count > 0 && first
 
 await setText('# Vector\n\n');
 await makeImage('plot.svg', 'violet', 300, 150, 'image/svg+xml');
+await markFrames();
 await paste('plot.svg');
 await until('svg pasted', async () => (await state()).text.includes('plot.svg'));
 await settled();
@@ -194,6 +255,7 @@ await makeImage('dropped.png', 'orange', 120, 60);
 writeFileSync(join(dir, 'dropped.png'), await imageBytes('dropped.png'));
 const target = '# Dropped\n\nOne two'.length;
 const at = await evaluate(`(() => { const r = ${view}.coordsAtPos(${target}); return { x: r.left + 1, y: (r.top + r.bottom) / 2 }; })()`);
+await markFrames();
 await drop([join(dir, 'dropped.png')], at);
 await until('dropped', async () => (await state()).text.includes('dropped.png'));
 s = await state();
@@ -240,6 +302,218 @@ await load();
 s = await state();
 check('a version 1 record, from before images, restores', s.text === '# Before images\n' && s.name === 'old.md' && !s.edited && s.failure === '', s);
 
+console.log('\nSaving beside the file, with the File System Access API');
+await opfsWrite('notes', 'notes.md', '# Notes\n\n');
+await evaluate(`__picker.open = 'notes.md'`);
+await key('o', { ctrl: true });
+await until('notes.md open', async () => (await state()).name === 'notes.md');
+await settled();
+await evaluate(`${view}.dispatch({ selection: { anchor: ${view}.state.doc.length } })`);
+await makeImage('image.png', 'magenta', 200, 100);
+const pastedBytes = (await imageBytes('image.png')).toString('base64');
+await paste('image.png');
+await until('pasted into notes.md', async () => (await state()).text === '# Notes\n\n![](image.png)');
+await settled();
+s = await state();
+check('an image pasted into a saved file whose folder is unknown says so, with Choose folder', s.notice === '1 image not saved beside notes.md', s);
+await evaluate(`__picker.folder = 'elsewhere'`);
+await key('s', { ctrl: true });
+await until('wrong folder refused', async () => (await state()).failure !== '');
+s = await state();
+check('Save asks for the folder, and refuses one that does not hold the file', s.failure === 'Could not save notes.md: Choose the folder that contains notes.md' && s.edited && (await opfsRead('notes', 'notes.md')) === '# Notes\n\n', s);
+await evaluate(`__picker.folder = 'notes'`);
+await key('s', { ctrl: true });
+await until('saved with its image', async () => !(await state()).edited);
+s = await state();
+const savedMd = await opfsRead('notes', 'notes.md');
+const savedImage = await opfsRead('notes', 'image.png', true);
+check('Save in the right folder writes the .md and the image beside it, byte for byte', savedMd === '# Notes\n\n![](image.png)' && savedImage === pastedBytes, { savedMd, image: savedImage?.length, pasted: pastedBytes.length });
+check('then the notice is gone, and the folder was asked for once per save', s.notice === '' && s.failure === '' && (await evaluate('__picker.folders')) === 2, { s, folders: await evaluate('__picker.folders') });
+await type('\n\nMore.');
+await key('s', { ctrl: true });
+await until('saved again', async () => !(await state()).edited);
+check('a later save knows the folder and asks for none', (await evaluate('__picker.folders')) === 2 && (await opfsRead('notes', 'notes.md')).endsWith(')\n\nMore.'));
+
+await evaluate(`Object.assign(__picker, { saveIn: 'elsewhere', save: 'copy.md' })`);
+await key('s', { ctrl: true, shift: true });
+await until('saved as elsewhere', async () => (await state()).name === 'copy.md');
+await settled();
+s = await state();
+check('Save as into another folder writes only the .md there, and the notice offers Choose folder', s.notice === '1 image not saved beside copy.md' && (await opfsRead('elsewhere', 'image.png', true)) === null, s);
+await barLayout();
+
+console.log('\nFinding images in the folder');
+await evaluate(`Object.assign(__picker, { saveIn: 'notes', open: 'notes.md', folder: 'notes' })`);
+await markFrames();
+await key('o', { ctrl: true });
+await until('notes.md opened fresh', async () => (await state()).name === 'notes.md');
+await settled();
+s = await state();
+first = await firstFrame();
+check('opened fresh, its image is not found, says the bar, and the preview shows a frame instead', s.notice === '1 image not found' && first && !first.page.found.magenta, s);
+await markFrames();
+await clickAt(await centreOf('#choose-folder'));
+await until('image read from the folder', async () => (await state()).notice === '');
+await settled();
+first = await firstFrame();
+check('Choose folder reads it from the folder: shown, notice gone', centredAt(first?.page, 'magenta', 200), first?.page.found);
+await makeImage('plot.png', 'cyan', 150, 50);
+await opfsWrite('notes', 'plot.png', '__images["plot.png"]');
+await evaluate(`(() => { const v = ${view}; v.dispatch({ selection: { anchor: v.state.doc.length } }); v.focus(); })()`);
+await type('\n\n![](plot.png)');
+const typedShown = await until('typed image found', () => evaluate(`__frames.findLast((f) => f.rev === __sent && f.final)?.pages.some((p) => p.found.cyan)`)).catch(() => false);
+s = await state();
+check('typing ![](plot.png) shows plot.png from the folder, with no notice', typedShown && s.text.endsWith('\n\n![](plot.png)') && s.notice === '', s);
+
+console.log('\nWithout the File System Access API');
+await page.send('Page.removeScriptToEvaluateOnNewDocument', stub);
+await page.send('Page.addScriptToEvaluateOnNewDocument', { source: NO_PICKERS });
+await page.send('Page.navigate', { url: 'about:blank' });
+await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'all' });
+await page.send('Page.setInterceptFileChooserDialog', { enabled: true });
+const chosen = [];
+page.listeners.add(({ method, params }) => {
+  if (method === 'Page.fileChooserOpened' && params.backendNodeId) page.send('DOM.setFileInputFiles', { files: chosen.shift(), backendNodeId: params.backendNodeId });
+});
+const downloads = join(dir, 'downloads');
+mkdirSync(downloads);
+const downloaded = new Map();
+await browser.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: downloads, eventsEnabled: true });
+browser.listeners.add(({ method, params }) => {
+  if (method === 'Browser.downloadWillBegin') downloaded.set(params.guid, { name: params.suggestedFilename, done: false });
+  if (method === 'Browser.downloadProgress' && params.state === 'completed') downloaded.get(params.guid).done = true;
+});
+async function nextDownloads(count, start) {
+  const seen = new Set(downloaded.keys());
+  await start();
+  const guids = await until('downloads', async () => {
+    const fresh = [...downloaded].filter(([g, d]) => !seen.has(g) && d.done);
+    return fresh.length >= count && fresh.map(([g]) => g);
+  });
+  return guids.map((guid) => ({ name: downloaded.get(guid).name, bytes: readFileSync(join(downloads, guid)) }));
+}
+await load();
+check('the pickers are gone', !(await evaluate(`'showOpenFilePicker' in window || 'showSaveFilePicker' in window || 'showDirectoryPicker' in window`)));
+await setText('# Fallback\n\n');
+await makeImage('image.png', 'magenta', 200, 100);
+await paste('image.png');
+await until('pasted', async () => (await state()).text.includes('!['));
+await settled();
+let files = await nextDownloads(2, () => key('s', { ctrl: true }));
+const md = files.find((f) => f.name === 'Untitled.md');
+const png = files.find((f) => f.name === 'image.png');
+check('Save downloads the .md and then the image beside it, bytes equal', md?.bytes.toString() === '# Fallback\n\n![](image.png)' && png?.bytes.toString('base64') === pastedBytes, files.map((f) => f.name));
+files = await nextDownloads(1, async () => {
+  await type(' Again.');
+  await key('s', { ctrl: true });
+});
+await sleep(500);
+check('a second save downloads only the .md: the image went with the first', files.length === 1 && files[0].name === 'Untitled.md' && [...downloaded.values()].filter((d) => d.name === 'image.png').length === 1, files.map((f) => f.name));
+
+const folder = join(dir, 'folder');
+mkdirSync(folder);
+writeFileSync(join(folder, 'fallback.md'), '# From disk\n\n![](image.png)\n');
+writeFileSync(join(folder, 'image.png'), Buffer.from(pastedBytes, 'base64'));
+chosen.push([join(folder, 'fallback.md')]);
+await key('s', { ctrl: true });
+await sleep(300);
+await key('o', { ctrl: true });
+await until('fallback.md open', async () => (await state()).name === 'fallback.md');
+await settled();
+check('opened through the file input, its image is not found', (await state()).notice === '1 image not found', await state());
+chosen.push([folder]);
+await markFrames();
+await clickAt(await centreOf('#choose-folder'));
+await until('folder read', async () => (await state()).notice === '');
+await settled();
+first = await firstFrame();
+check('Choose folder through the folder input reads the image: shown, notice gone', centredAt(first?.page, 'magenta', 200), first?.page.found);
+
+console.log('\nDropping a Markdown file with its image');
+writeFileSync(join(folder, 'dropped.md'), '# Dropped with its image\n\n![](image.png)\n');
+await markFrames();
+await drop([join(folder, 'dropped.md'), join(folder, 'image.png')], await centreOf('#pages'));
+await until('dropped.md open', async () => (await state()).name === 'dropped.md');
+await settled();
+s = await state();
+first = await firstFrame();
+check('a .md dropped with its image opens with the image shown, and nothing to notice', centredAt(first?.page, 'magenta', 200) && s.notice === '' && !s.edited, { s, found: first?.page.found });
+
+console.log('\nLinking around an image');
+const LINKED = '# Linked\n\nBefore the picture.\n\n![](image.png)\n\nAfter the picture.\n';
+await markFrames();
+await setText(LINKED);
+await settled();
+const { data: { pages: runPages } } = await evaluate(`new Promise((resolve) => {
+  const on = ({ data }) => data.kind === 'runs' && (__worker.removeEventListener('message', on), resolve({ data }));
+  __worker.addEventListener('message', on);
+  __worker.postMessage({ kind: 'runs', id: 1e9 });
+})`);
+const pageBox = await evaluate(`(() => { const r = document.querySelector('#pages canvas').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
+const onPage = (fx, fy) => ({ x: pageBox.x + fx * pageBox.w, y: pageBox.y + fy * pageBox.h });
+const runAt = (text) => {
+  const { width, height, runs } = runPages[0];
+  const run = runs.find((r) => r.text.includes(text));
+  return run && onPage((run.x + run.w / 2) / width, (run.y + run.h / 2) / height);
+};
+async function clickPreview(point) {
+  const before = await evaluate(`${view}.state.selection.main.head`);
+  await evaluate(`${view}.dispatch({ selection: { anchor: 0 } })`);
+  await clickAt(point);
+  await until('cursor moved', async () => (await evaluate(`${view}.state.selection.main.head`)) !== 0, 50).catch(() => null);
+  return [before, await evaluate(`${view}.state.selection.main.head`)][1];
+}
+const inside = (head, text) => head >= LINKED.indexOf(text) && head <= LINKED.indexOf(text) + text.length;
+let head = await clickPreview(runAt('Before'));
+check('a click on the text right before a block image puts the cursor in that text', inside(head, 'Before the picture.'), { head, near: LINKED.slice(head - 5, head + 5) });
+head = await clickPreview(runAt('After'));
+check('a click on the text right after it puts the cursor in that text', inside(head, 'After the picture.'), { head, near: LINKED.slice(head - 5, head + 5) });
+first = await firstFrame();
+const [l, t, r, b] = fractions(first.page, first.page.found.magenta.box);
+head = await clickPreview(onPage((l + r) / 2, (t + b) / 2));
+console.log(`     a click on the image itself puts the cursor at offset ${head} of ${LINKED.length}: ${J(LINKED.slice(Math.max(0, head - 12), head))}|${J(LINKED.slice(head, head + 12))}`);
+
 await close();
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exit(failures ? 1 : 0);
+
+/** The bar with the notice showing, at desktop and phone widths in both schemes: rows, and nothing off screen or overlapping. */
+async function barLayout() {
+  if (args.shots) mkdirSync(args.shots, { recursive: true });
+  for (const [width, height, mobile] of [
+    [1400, 900, false],
+    [375, 812, true],
+  ]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile });
+    for (const scheme of ['light', 'dark']) {
+      await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+      await sleep(300);
+      const bar = await evaluate(`(() => {
+        const box = (el) => el.getBoundingClientRect();
+        const bar = box(document.querySelector('.bar'));
+        const name = box(document.getElementById('file-name'));
+        const notice = box(document.getElementById('image-notice'));
+        const actions = box(document.querySelector('.actions'));
+        const apart = (a, b) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+        return {
+          height: Math.round(bar.height),
+          shown: !document.getElementById('image-notice').hidden,
+          inside: [notice, ...[...document.querySelectorAll('.bar button')].map(box)].every((b) => b.left >= 0 && b.right <= innerWidth && b.top >= bar.top && b.bottom <= bar.bottom),
+          clear: apart(name, notice) && apart(notice, actions) && apart(name, actions),
+          nameWidth: Math.round(name.width),
+        };
+      })()`);
+      check(
+        `${width} px ${scheme}: with the notice the bar ${width > 720 ? 'stays one row' : 'gains a third row for it'}, all of it on screen, nothing overlapping, the name not squeezed out`,
+        bar.shown && bar.height < (width > 720 ? 50 : 120) && bar.inside && bar.clear && bar.nameWidth > 40,
+        bar,
+      );
+      if (!args.shots) continue;
+      const file = join(args.shots, `notice-${width}-${scheme}.png`);
+      writeFileSync(file, Buffer.from((await page.send('Page.captureScreenshot', { clip: { x: 0, y: 0, width, height: 160, scale: 1 } })).data, 'base64'));
+      console.log(`     ${file}`);
+    }
+  }
+  await page.send('Emulation.clearDeviceMetricsOverride');
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+}
