@@ -48,8 +48,11 @@ export type ToWorker =
   /** Sent before the first edit and on every change. */
   | { kind: 'settings'; settings: PageSettings }
   | { kind: 'edit'; rev: Rev; markdown: string }
-  /** An image the document can show, sent before the edit that references it. Null bytes remove it. */
-  | { kind: 'image'; path: ImagePath; bytes: Bytes | null }
+  /**
+   * An image the document can show, sent before the edit that references it. Null bytes remove it. `drawn` is an
+   * SVG image drawn by the main thread, since a worker cannot decode SVG; null for the other types.
+   */
+  | { kind: 'image'; path: ImagePath; bytes: Bytes | null; drawn: ImageBitmap | null }
   | { kind: 'pdf'; rev: Rev }
   | ({ kind: 'view' } & View)
   | LinkRequest;

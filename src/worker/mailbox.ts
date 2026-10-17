@@ -1,8 +1,9 @@
 import type { ImagePath } from '../images';
-import type { Bytes, LinkRequest, Rev, ToWorker, View } from '../protocol';
+import type { LinkRequest, Rev, ToWorker, View } from '../protocol';
 import type { PageSettings } from '../settings';
 
 export type Edit = Extract<ToWorker, { kind: 'edit' }>;
+export type ImageUpdate = Extract<ToWorker, { kind: 'image' }>;
 
 /** Clicks go before cursor moves, and both before the check's run dump. */
 const LINK_ORDER: LinkRequest['kind'][] = ['source', 'locate', 'runs'];
@@ -14,7 +15,7 @@ export interface MailboxHandlers {
   /** Bookkeeping only, applied between jobs so the next job draws at the new size. */
   view(view: View): void;
   /** Gives the compiler each image's newest bytes, or takes it away for null. */
-  images(changes: ReadonlyMap<ImagePath, Bytes | null>): void;
+  images(updates: ImageUpdate[]): void;
   pdf(rev: Rev): Promise<void>;
   /** Answers one linking request. */
   link(request: LinkRequest): Promise<void>;
@@ -41,7 +42,7 @@ export class Mailbox {
   /** The newest edit compiled, which a settings change compiles again. */
   #last: Edit | null = null;
   #view: View | null = null;
-  #images = new Map<ImagePath, Bytes | null>();
+  #images = new Map<ImagePath, ImageUpdate>();
   #pdf: Rev | null = null;
   readonly #links = new Map<LinkRequest['kind'], LinkRequest>();
   readonly #handlers: MailboxHandlers;
@@ -68,7 +69,7 @@ export class Mailbox {
         break;
       }
       case 'image':
-        this.#images.set(message.path, message.bytes);
+        this.#images.set(message.path, message);
         break;
       case 'pdf':
         this.#pdf = message.rev;
@@ -98,7 +99,7 @@ export class Mailbox {
         if (this.#images.size > 0) {
           const images = this.#images;
           this.#images = new Map();
-          this.#handlers.images(images);
+          this.#handlers.images([...images.values()]);
           this.#pending ??= this.#last;
         }
         const settings = this.#settings;

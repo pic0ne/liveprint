@@ -11,8 +11,8 @@ import { preludeFor, THEMES } from '../typst/themes';
 import { measureFaces } from './advances';
 import { FontFiles } from './fonts';
 import { Linker } from './linker';
-import { type Edit, Mailbox } from './mailbox';
-import { PageRaster } from './raster';
+import { type Edit, type ImageUpdate, Mailbox } from './mailbox';
+import { drawSvgFrom, PageRaster } from './raster';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -216,8 +216,8 @@ async function answerLink(request: LinkRequest): Promise<void> {
   }
 }
 
-function applyImages(changes: ReadonlyMap<ImagePath, Bytes | null>): void {
-  for (const [path, bytes] of changes) {
+function applyImages(updates: ImageUpdate[]): void {
+  for (const { path, bytes, drawn } of updates) {
     if (bytes) {
       compiler.mapShadow(`/images/${path}`, bytes);
       available.add(path);
@@ -225,6 +225,7 @@ function applyImages(changes: ReadonlyMap<ImagePath, Bytes | null>): void {
       compiler.unmapShadow(`/images/${path}`);
       available.delete(path);
     }
+    drawSvgFrom(path, bytes, drawn);
   }
 }
 

@@ -10,7 +10,7 @@ const view = (widthPx: number) => ({ kind: 'view', widthPx, dpr: 1, visible: { f
 const locate = (id: number) => ({ kind: 'locate', id, offset: id }) as const;
 const source = (id: number) => ({ kind: 'source', id, page: 0, fx: 0, fy: 0 }) as const;
 const image = (path: string, size: number | null) =>
-  ({ kind: 'image', path: path as ImagePath, bytes: size === null ? null : (new Uint8Array(size) as Bytes) }) as const;
+  ({ kind: 'image', path: path as ImagePath, bytes: size === null ? null : (new Uint8Array(size) as Bytes), drawn: null }) as const;
 const settings = (theme: ThemeId) => ({ kind: 'settings', settings: { paper: 'a4', margins: 'normal', theme } }) as const;
 
 /** A mailbox whose compiles finish only when the test says so. */
@@ -32,7 +32,7 @@ function harness() {
     },
     edit: (e) => job(`edit ${e.rev}`)(),
     view: (v) => log.push(`view ${v.widthPx}`),
-    images: (changes) => log.push(`images ${[...changes].map(([path, bytes]) => `${path}=${bytes?.length ?? null}`).join(' ')}`),
+    images: (updates) => log.push(`images ${updates.map(({ path, bytes }) => `${path}=${bytes?.length ?? null}`).join(' ')}`),
     pdf: (rev) => job(`pdf ${rev}`)(),
     link: (request) => job(`${request.kind} ${request.id}`)(),
     raster: async () => {

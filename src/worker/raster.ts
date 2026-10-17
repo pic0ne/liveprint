@@ -1,11 +1,55 @@
 import { createTypstRenderer, type RenderSession, type TypstRenderer } from '@myriaddreamin/typst.ts/renderer';
 import rendererWasm from '@myriaddreamin/typst-ts-renderer/wasm?url';
-import type { PageBitmap, PageSize, View } from '../protocol';
+import type { ImagePath } from '../images';
+import type { Bytes, PageBitmap, PageSize, View } from '../protocol';
 import { type PagePt, RasterPlan } from './rasterPlan';
 
 // The renderer wasm accepts only `instanceof CanvasRenderingContext2D`, which workers do not define.
-const scope = self as { CanvasRenderingContext2D?: unknown };
+const scope = self as { CanvasRenderingContext2D?: unknown; Window?: unknown; Image?: unknown };
 scope.CanvasRenderingContext2D ??= OffscreenCanvasRenderingContext2D;
+
+/** Each SVG image's drawing, by the SVG's text, and the text by the path it was sent under. */
+const svgDrawings = new Map<string, ImageBitmap>();
+const svgTexts = new Map<ImagePath, string>();
+
+/** Keeps the main thread's drawing of the SVG image at `path` for the stand-in below, or forgets it for null bytes. */
+export function drawSvgFrom(path: ImagePath, bytes: Bytes | null, drawn: ImageBitmap | null): void {
+  const old = svgTexts.get(path);
+  svgTexts.delete(path);
+  if (old !== undefined && ![...svgTexts.values()].includes(old)) {
+    svgDrawings.get(old)?.close();
+    svgDrawings.delete(old);
+  }
+  if (!bytes || !drawn) return;
+  const text = new TextDecoder().decode(bytes);
+  svgTexts.set(path, text);
+  svgDrawings.set(text, drawn);
+}
+
+// The renderer decodes PNG, JPEG, GIF and WebP with createImageBitmap, but an SVG it loads into `new Image()`, and
+// only when `self` passes for a Window; without one it panics. Workers have no Image and cannot decode SVG at all, so
+// the stand-in is a canvas that copies the main thread's drawing of the SVG its `src` names. It never reports an
+// error, which the renderer would also panic on: an SVG it has no drawing of stays blank.
+scope.Window ??= self.constructor;
+scope.Image ??= function Image() {
+  const canvas = Object.assign(new OffscreenCanvas(1, 1), { onload: null as (() => void) | null });
+  Object.defineProperty(canvas, 'src', {
+    set(url: string) {
+      void fetch(url)
+        .then((response) => response.text())
+        .then((text) => {
+          const drawing = svgDrawings.get(text);
+          if (drawing) {
+            Object.assign(canvas, { width: drawing.width, height: drawing.height });
+            canvas.getContext('2d')!.drawImage(drawing, 0, 0);
+          }
+        })
+        .catch(() => {})
+        .finally(() => canvas.onload?.());
+    },
+  });
+  return canvas;
+};
 
 /** runWithSession frees the session when its callback settles, so this callback never does. */
 const openSession = (renderer: TypstRenderer) =>
