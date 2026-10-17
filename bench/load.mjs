@@ -1,6 +1,6 @@
 // Load time in headless Chrome against `vite preview` of dist/ (`npm run bench:load` builds it).
-// node bench/load.mjs [--runs 3] [--throttle <Mbit/s>] [--offline]
-// Each run is a cold load, with the HTTP cache and all site data cleared, then a warm reload. The time is from
+// node bench/load.mjs [--runs 3] [--warm 1] [--throttle <Mbit/s>] [--offline]
+// Each run is a cold load, with the HTTP cache and all site data cleared, then --warm reloads. The time is from
 // navigation start to the paint after the worker's first pages. --offline then stops the server and reloads once.
 import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
@@ -8,6 +8,7 @@ import { launch, sleep, until } from './cdp.mjs';
 const { values: args } = parseArgs({
   options: {
     runs: { type: 'string', default: '3' },
+    warm: { type: 'string', default: '1' },
     throttle: { type: 'string' },
     offline: { type: 'boolean', default: false },
   },
@@ -85,7 +86,7 @@ async function settleWorker() {
 
 const MB = (bytes) => `${(bytes / 1e6).toFixed(2)} MB`;
 const row = (label, r) =>
-  `  ${label.padEnd(5)} first page ${r.firstPage.toFixed(0).padStart(5)} ms  compiler ready ${r.bootMs.toFixed(0).padStart(5)} ms (worker clock)  wire ${MB(r.wire).padStart(9)}  ${r.requests} requests, ${r.fromServiceWorker} from the service worker`;
+  `  ${label.padEnd(6)} first page ${r.firstPage.toFixed(0).padStart(5)} ms  compiler ready ${r.bootMs.toFixed(0).padStart(5)} ms (worker clock)  wire ${MB(r.wire).padStart(9)}  ${r.requests} requests, ${r.fromServiceWorker} from the service worker`;
 
 console.log(`load, ${args.throttle ? `${args.throttle} Mbit/s, 40 ms latency` : 'loopback, no throttling'}`);
 for (let i = 0; i < Number(args.runs); i++) {
@@ -94,11 +95,12 @@ for (let i = 0; i < Number(args.runs); i++) {
   await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'all' });
   const cold = await load();
   const worker = await settleWorker();
-  await sleep(500);
-  const warm = await load();
   console.log(`run ${i + 1} (service worker: ${worker})`);
   console.log(row('cold', cold));
-  console.log(row('warm', warm));
+  for (let w = 1; w <= Number(args.warm); w++) {
+    await sleep(500);
+    console.log(row(`warm${w}`, await load()));
+  }
 }
 if (args.offline) {
   await settleWorker();
