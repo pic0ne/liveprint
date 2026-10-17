@@ -1,6 +1,6 @@
 // Images, end to end in headless Chrome against `vite preview` of dist/ (`npm run check:images` builds it): pasting
 // and dropping them, the first bitmap that shows them, restoring, saving beside the file, finding them in its folder,
-// and linking around them. Test images are drawn in the page with canvas, one solid colour each, so a page bitmap
+// and linking images and around them. Test images are drawn in the page with canvas, one solid colour each, so a page bitmap
 // shows an image where that colour is. As in check-files.mjs, CDP cannot answer the File System Access pickers, so
 // the API run replaces showOpenFilePicker, showSaveFilePicker and showDirectoryPicker with handles from the origin
 // private file system; reading, writing and the read-back are real. The fallback run deletes the pickers.
@@ -39,12 +39,14 @@ const WATCH_WORKER = `
   localStorage.setItem('liveprint.page', ${J(J({ paper: 'a4', margins: 'normal', theme: 'book' }))});
   window.__sent = -1;
   window.__frames = [];
+  window.__located = 0;
   window.__colours = ${J(COLOURS)};
   window.Worker = class extends Worker {
     constructor(...args) {
       super(...args);
       window.__worker = this;
       this.addEventListener('message', ({ data }) => {
+        if (data.kind === 'located') __located++;
         if (data.kind !== 'pages') return;
         const pages = data.bitmaps.map(({ index, bitmap }) => {
           const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -497,15 +499,67 @@ let head = await clickPreview(runAt('Before'));
 check('a click on the text right before a block image puts the cursor in that text', inside(head, 'Before the picture.'), { head, near: LINKED.slice(head - 5, head + 5) });
 head = await clickPreview(runAt('After'));
 check('a click on the text right after it puts the cursor in that text', inside(head, 'After the picture.'), { head, near: LINKED.slice(head - 5, head + 5) });
-first = await firstFrame();
-const [l, t, r, b] = fractions(first.page, first.page.found.magenta.box);
-head = await clickPreview(onPage((l + r) / 2, (t + b) / 2));
-console.log(`     a click on the image itself puts the cursor at offset ${head} of ${LINKED.length}: ${J(LINKED.slice(Math.max(0, head - 12), head))}|${J(LINKED.slice(head, head + 12))}`);
+await linkImage(LINKED, 'a block image');
+await markFrames();
+await setText('# Inline\n\nWords before ![](image.png) words after.\n');
+await settled();
+await linkImage(await evaluate(`${view}.state.doc.toString()`), 'an inline image');
 
 await close();
 rmSync(dir, { recursive: true, force: true });
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exit(failures ? 1 : 0);
+
+/**
+ * Checks both directions for the one image in `text`, against its box in the first bitmap that showed it: a click
+ * anywhere on it lands inside its Markdown, and the cursor inside its Markdown lays the band over it, with no caret.
+ */
+async function linkImage(text, what) {
+  const from = text.indexOf('![](image.png)');
+  const to = from + '![](image.png)'.length;
+  const frame = await firstFrame();
+  const box = fractions(frame.page, frame.page.found.magenta.box);
+  const [l, t, r, b] = box;
+  const heads = [];
+  for (const [u, v] of [[0.5, 0.5], [0.04, 0.06], [0.96, 0.06], [0.04, 0.94], [0.96, 0.94]]) heads.push(await clickPreview(onPage(l + u * (r - l), t + v * (b - t))));
+  check(`a click on ${what}, in its centre or near a corner, puts the cursor inside its ![](image.png)`, heads.every((h) => h > from && h < to), { heads, from, to });
+
+  const marks = [];
+  for (const offset of [from + 1, from + 5, to - 1]) marks.push(await markFor(offset));
+  const near = (band) => band.every((v, i) => Math.abs(v - box[i]) < 0.004);
+  check(`the cursor inside ${what}'s Markdown lays the band over the image, with no caret`, marks.every((m) => !m.hidden && !m.caret && near(m.band)), { box, marks });
+  const beside = [await markFor(from), await markFor(to)];
+  check(`the cursor just before or after ${what}'s Markdown shows the text caret`, beside.every((m) => !m.hidden && m.caret), beside);
+
+  const times = [];
+  for (let i = 0; i < 11; i++) {
+    times.push(await evaluate(`new Promise((resolve) => {
+      const t0 = performance.now();
+      const on = ({ data }) => data.kind === 'sourced' && data.id === ${2e9 + i} && (__worker.removeEventListener('message', on), resolve(performance.now() - t0));
+      __worker.addEventListener('message', on);
+      __worker.postMessage({ kind: 'source', id: ${2e9 + i}, page: 0, fx: ${(l + r) / 2}, fy: ${(t + b) / 2} });
+    })`));
+  }
+  console.log(`     click on ${what} to source offset: median ${times.sort((x, y) => x - y)[5].toFixed(1)} ms, max ${times[10].toFixed(1)} ms`);
+}
+
+/** Where the preview marks the cursor at `offset`: the band as page fractions, and whether the caret shows. */
+async function markFor(offset) {
+  const seen = await evaluate('__located');
+  await evaluate(`${view}.dispatch({ selection: { anchor: ${offset} } })`);
+  await until('cursor located', async () => (await evaluate('__located')) > seen);
+  await sleep(100);
+  return evaluate(`(() => {
+    const page = document.querySelector('#pages canvas').getBoundingClientRect();
+    const band = document.querySelector('.cursor-line').getBoundingClientRect();
+    const round = (v) => Math.round(v * 1000) / 1000;
+    return {
+      hidden: document.querySelector('.cursor-mark').hidden,
+      caret: !document.querySelector('.cursor-caret').hidden,
+      band: [(band.left - page.left) / page.width, (band.top - page.top) / page.height, (band.right - page.left) / page.width, (band.bottom - page.top) / page.height].map(round),
+    };
+  })()`);
+}
 
 /** The bar with the notice showing, at desktop and phone widths in both schemes: rows, and nothing off screen or overlapping. */
 async function barLayout() {
