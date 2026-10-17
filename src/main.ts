@@ -176,31 +176,38 @@ function showFile(text = editor.state.doc.toString()): void {
 }
 showFile();
 
-// Kept at most every 300 ms while typing, rather than after a pause, so a crash mid-sentence loses little.
-let keepTimer = 0;
-function keepNow(): void {
-  clearTimeout(keepTimer);
-  keepTimer = 0;
-  keepDoc({ text: editor.state.doc.toString(), file }).catch((error) => {
-    last.fileFailure = `Could not keep a copy of ${file.name} in this browser: ${message(error)}`;
-    drawOverlay();
-  });
+// A write started as the page unloads can be aborted with it, so the copy is kept current all along instead: one
+// write at a time, and the newest document written as soon as the last one ends.
+let keeping = false;
+let keepAgain = false;
+function keep(): void {
+  if (keeping) {
+    keepAgain = true;
+    return;
+  }
+  keeping = true;
+  keepDoc({ text: editor.state.doc.toString(), file })
+    .catch((error) => {
+      last.fileFailure = `Could not keep a copy of ${file.name} in this browser: ${message(error)}`;
+      drawOverlay();
+    })
+    .finally(() => {
+      keeping = false;
+      if (keepAgain) {
+        keepAgain = false;
+        keep();
+      }
+    });
 }
-const keepSoon = () => (keepTimer ||= window.setTimeout(keepNow, 300));
-// beforeunload comes first, while the next page is still loading; a write that starts at pagehide can be dropped.
 window.addEventListener('beforeunload', (e) => {
-  if (keepTimer) keepNow();
   if (isEdited(editor.state.doc.toString(), file)) e.preventDefault();
-});
-window.addEventListener('pagehide', () => {
-  if (keepTimer) keepNow();
 });
 
 function changed(markdown: string): void {
   rev = nextRev(rev);
   send({ kind: 'edit', rev, markdown });
   showFile(markdown);
-  keepSoon();
+  keep();
 }
 
 function openDoc(doc: Doc): void {
@@ -241,7 +248,7 @@ const save = (as: boolean) =>
     if (!saved) return;
     file = saved;
     showFile();
-    keepSoon();
+    keep();
   });
 
 window.addEventListener('keydown', (e) => {

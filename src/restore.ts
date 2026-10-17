@@ -7,8 +7,6 @@ const STORE = 'doc';
 const KEY = 'last';
 
 let db: Promise<IDBDatabase> | null = null;
-/** Set once open, so a write on pagehide starts its transaction before the page goes, not a microtask later. */
-let opened: IDBDatabase | null = null;
 
 const done = <T>(request: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
@@ -20,7 +18,7 @@ function open(): Promise<IDBDatabase> {
   db ??= new Promise((resolve, reject) => {
     const request = indexedDB.open(DB, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => resolve((opened = request.result));
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
   return db;
@@ -44,8 +42,5 @@ export async function restoreDoc(): Promise<Doc | null> {
 }
 
 export async function keepDoc(doc: Doc): Promise<void> {
-  const transaction = (opened ?? (await open())).transaction(STORE, 'readwrite');
-  const put = done(transaction.objectStore(STORE).put(doc, KEY));
-  transaction.commit();
-  await put;
+  await done((await open()).transaction(STORE, 'readwrite').objectStore(STORE).put(doc, KEY));
 }
