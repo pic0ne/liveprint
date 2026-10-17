@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { transformWithOxc, type Plugin } from 'vite';
 import { FONT_FILES, type Precache } from '../src/typst/files.ts';
 
@@ -34,7 +34,7 @@ export function serviceWorker(): Plugin {
     apply: 'build',
     configResolved(config) {
       root = config.root;
-      outDir = join(root, config.build.outDir);
+      outDir = resolve(root, config.build.outDir);
     },
     async closeBundle() {
       const source = join(root, 'src/sw.ts');
