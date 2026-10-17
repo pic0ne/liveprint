@@ -4,6 +4,8 @@
 // a bitmap after every key, which perturbs timing. --switch instead times choosing a theme until its first pages paint.
 // --images instead compares typing in the sample with and without three pasted images (a 1200x800 PNG screenshot,
 // a 4000x3000 JPEG photo, an SVG chart), --runs times each, alternating, and measures pasting the photo and memory.
+// --math instead empties each formula of the sample, keeping its closed `$` delimiters, and types its LaTeX back one key
+// at a time, --runs times. It counts the keys whose compile failed and times keystroke to preview per key.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -17,6 +19,7 @@ const { values: args } = parseArgs({
     check: { type: 'string' },
     switch: { type: 'boolean', default: false },
     images: { type: 'boolean', default: false },
+    math: { type: 'boolean', default: false },
     runs: { type: 'string', default: '5' },
   },
 });
@@ -110,14 +113,27 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
   source: `localStorage.setItem('liveprint.page', ${JSON.stringify(JSON.stringify({ paper: 'a4', margins: 'normal', theme: args.theme }))});
     window.__pages = { messages: 0, bitmaps: 0, located: 0 };
     window.__shown = null;
+    window.__keys = { at: NaN, edits: [], painted: [], failed: [], broken: [] };
+    addEventListener('keydown', (e) => (__keys.at = e.timeStamp), true);
     window.Worker = class extends Worker {
       constructor(...args) {
         super(...args);
         window.__worker = this;
+        const post = this.postMessage.bind(this);
+        this.postMessage = (message, transfer) => {
+          if (message.kind === 'edit') __keys.edits.push({ rev: message.rev, at: __keys.at });
+          post(message, transfer);
+        };
         this.addEventListener('message', ({ data }) => {
           if (data.kind === 'pages') (__pages.messages++, (__pages.bitmaps += data.bitmaps.length), (__shown = { ...data.settings, final: data.final }));
           if (data.kind === 'pages') (window.__log ??= []).push({ at: performance.now(), rev: data.rev, final: data.final, images: data.images, pages: data.bitmaps.map((b) => b.index), compileMs: data.compileMs, rasterMs: data.rasterMs });
           if (data.kind === 'failed') (window.__failed ??= []).push(data.diagnostics[0]);
+          if (data.kind === 'failed') __keys.failed.push(data.rev);
+          if (data.kind === 'pages' && data.mathErrors?.length) __keys.broken.push(data.rev);
+          if (data.kind === 'pages' && __keys.painted.at(-1)?.rev !== data.rev) {
+            const rev = data.rev;
+            requestAnimationFrame(() => setTimeout(() => __keys.painted.push({ rev, at: performance.now() })));
+          }
           if (data.kind === 'located') __pages.located++;
         });
       }
@@ -125,6 +141,11 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
 });
 if (args.switch) {
   await timeSwitches();
+  await close();
+  process.exit(0);
+}
+if (args.math) {
+  await timeMath(Number(args.runs));
   await close();
   process.exit(0);
 }
@@ -414,4 +435,55 @@ async function timeImages(runs) {
   console.log('\nmemory, MB: worker heap used / total / backing stores after a GC, largest renderer RSS');
   const fmt = (m) => `${m.heapUsed.toFixed(1)} / ${m.heapTotal.toFixed(1)} / ${m.backing.toFixed(1)}${m.collected ? '' : ' (GC did not answer)'}, RSS ${m.rendererRss.toFixed(0)}`;
   memories.without.forEach((m, i) => console.log(`  run ${i + 1}: before the images ${fmt(m)}  after ${fmt(memories.with[i])}`));
+}
+
+/**
+ * Each key is timed from its keydown to the paint after the first pages of its rev or a newer one. A key is broken when
+ * its rev failed to compile or compiled with a formula shown as LaTeX. Before the fix, a failed key waits for the
+ * first key that makes its formula valid again.
+ */
+async function timeMath(runs) {
+  const formulas = [...readFileSync(new URL('../src/sample.md', import.meta.url), 'utf8').matchAll(/(\$\$?)([^$]+)\1/g)].map((m) => ({ open: m[1], tex: m[2] }));
+  const keys = [];
+  for (let run = 0; run < runs; run++) {
+    await load({ line: 1 });
+    await settledFinal();
+    for (const { open, tex } of formulas) {
+      await evaluate(`(() => {
+        const view = document.querySelector('.cm-content').cmTile.view;
+        const whole = ${JSON.stringify(open + tex + open)};
+        const from = view.state.doc.toString().indexOf(whole) + ${open.length};
+        view.dispatch({ changes: { from, to: from + ${tex.length} }, selection: { anchor: from }, scrollIntoView: true });
+        view.focus();
+      })()`);
+      await sleep(1000);
+      const typedFrom = await evaluate('__keys.edits.length');
+      for (const key of tex) {
+        await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key, text: key, unmodifiedText: key });
+        await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key });
+        await sleep(GAP);
+      }
+      await sleep(1000);
+      keys.push(
+        ...(await evaluate(`__keys.edits.slice(${typedFrom}).map(({ rev, at }) => ({
+          rev,
+          ms: (__keys.painted.find((p) => p.rev >= rev)?.at ?? NaN) - at,
+          failed: __keys.failed.includes(rev),
+          broken: __keys.failed.includes(rev) || __keys.broken.includes(rev),
+        }))`)),
+      );
+    }
+    const failed = await evaluate('window.__failed?.length ?? 0');
+    console.log(`run ${run + 1}: ${formulas.length} formulas, ${keys.length} keys so far, ${failed} failed compiles this run`);
+  }
+  const pct = (xs, p) => {
+    const sorted = xs.filter(Number.isFinite).sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)].toFixed(1) : '–';
+  };
+  const row = (label, xs) => console.log(`  ${label.padEnd(28)} ${String(xs.length).padStart(4)} keys  p50 ${pct(xs.map((k) => k.ms), 0.5)}  p95 ${pct(xs.map((k) => k.ms), 0.95)} ms`);
+  console.log(`\ntyping ${formulas.length} formulas of the sample, ${runs} runs, keystroke to preview:`);
+  row('keys in a broken formula', keys.filter((k) => k.broken));
+  row('keys in a valid formula', keys.filter((k) => !k.broken));
+  row('all keys', keys);
+  console.log(`  keys whose compile failed: ${keys.filter((k) => k.failed).length} of ${keys.length}`);
 }
