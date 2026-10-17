@@ -110,6 +110,16 @@ A choice applies at once to the preview and to **Download .pdf**, and the browse
 
 Book uses only the fonts that load at start-up. Paper needs 2.2 MB of fonts and Modern 890 KB, and the worker downloads them only when you first choose that theme. While they download, the preview stays in the previous theme and keeps up with your typing. Over loopback in headless Chrome, a first choice of Paper showed its first pages after 189 to 217 ms, and of Modern after 163 to 184 ms. About 100 ms of that is compiling the whole document again in the new theme, and about 45 ms is drawing the visible pages. Choosing a theme again took 45 to 52 ms. To measure it, run `npm run build` and then `node bench/browser.mjs --switch`.
 
+If the download fails, the preview stays in the previous theme, and a line in its corner says so until you choose a theme: **Could not download the Paper fonts: Failed to fetch. Choose Paper again to retry.** The menu goes back to the theme on screen, and so does the choice the browser keeps, so the button never names a theme the preview is not in, nothing pulses, and a reload starts cleanly. Because the failed theme is no longer the one checked, choosing it again is a change like any other, and it downloads the fonts again. If the stored theme's fonts fail while the page starts, the first pages are in Book, with the same line.
+
+Fonts the service worker has cached never fail, so the check runs both with the service worker in control and without it:
+
+```bash
+npm run check:themes
+```
+
+It fails the Paper font requests through the DevTools protocol's Fetch domain on the browser, which also catches the service worker's own requests, and counts them to prove they were failed. It checks that the line stays over 10 keystrokes while the preview stays in Book and keeps up, that the menu and the stored choice say Book, that choosing Paper again clears the line and tries again, that a reload starts cleanly, and that once the fonts can download, choosing Paper shows Paper with no trace of the failure.
+
 Typing latency did not change. Over three alternating runs of `npm run bench:browser`, typing in the title measured 40.1 to 42.1 ms at p50 before page settings, with the old 6-page layout, and 40.8 to 42.2 ms after, in Book. The reflowing edit measured 23.6 to 30.0 ms before and 23.8 to 30.3 ms after.
 
 ## Files
@@ -237,6 +247,7 @@ Other scripts:
 - `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
 - `npm run check:files` checks opening, saving, restoring and dropping files in headless Chrome.
 - `npm run check:images` checks pasting, dropping, restoring, saving and linking images in headless Chrome.
+- `npm run check:themes` checks what happens when a theme's fonts fail to download, with the service worker and without it.
 - `npm run bench:load` measures the time to the first page, cold and warm, in headless Chrome.
 - `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
@@ -259,7 +270,6 @@ Known limits:
 - Opening a document with images can compile the previous document once more before the new one. In five measured opens, the new document's first pages took 73 to 100 ms either way.
 - Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
 - Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking measures body text with the math font's upright letters, which have the same design, and the menu sets the name Paper in the math font.
-- If a theme's fonts fail to download, the preview stays in the previous theme and the menu keeps showing the chosen theme as loading. Choosing it again retries the download.
 - A formula that shows as typed also prints as typed in **Download .pdf**.
 
 ## Licence
