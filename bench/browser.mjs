@@ -1,8 +1,10 @@
 // Keystroke-to-preview latency in headless Chrome against `vite preview` of dist/ (`npm run bench:browser` builds it).
-// node bench/browser.mjs [--keys 60] [--gap 150] [--theme book] [--check <dir>] [--switch]
+// node bench/browser.mjs [--keys 60] [--gap 150] [--theme book] [--check <dir>] [--switch] [--images] [--runs 5]
 // Pages are A4 with normal margins in --theme. --check also screenshots into <dir> and counts visible pages without
 // a bitmap after every key, which perturbs timing. --switch instead times choosing a theme until its first pages paint.
-import { mkdirSync, writeFileSync } from 'node:fs';
+// --images instead compares typing in the sample with and without three pasted images (a 1200x800 PNG screenshot,
+// a 4000x3000 JPEG photo, an SVG chart), --runs times each, alternating, and measures pasting the photo and memory.
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
@@ -14,9 +16,12 @@ const { values: args } = parseArgs({
     theme: { type: 'string', default: 'book' },
     check: { type: 'string' },
     switch: { type: 'boolean', default: false },
+    images: { type: 'boolean', default: false },
+    runs: { type: 'string', default: '5' },
   },
 });
-const [KEYS, GAP] = [Number(args.keys), Number(args.gap)];
+// The overlay's meter keeps the newest 100 latencies, so with --images more keys than that leave out the pastes.
+const [KEYS, GAP] = [args.images ? Math.max(110, Number(args.keys)) : Number(args.keys), Number(args.gap)];
 
 const SPOTS = {
   // End of the title: each key lengthens one short line on page 1, so later pages rarely change.
@@ -111,6 +116,8 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
         window.__worker = this;
         this.addEventListener('message', ({ data }) => {
           if (data.kind === 'pages') (__pages.messages++, (__pages.bitmaps += data.bitmaps.length), (__shown = { ...data.settings, final: data.final }));
+          if (data.kind === 'pages') (window.__log ??= []).push({ at: performance.now(), rev: data.rev, final: data.final, images: data.images, pages: data.bitmaps.map((b) => b.index), compileMs: data.compileMs, rasterMs: data.rasterMs });
+          if (data.kind === 'failed') (window.__failed ??= []).push(data.diagnostics[0]);
           if (data.kind === 'located') __pages.located++;
         });
       }
@@ -118,6 +125,11 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
 });
 if (args.switch) {
   await timeSwitches();
+  await close();
+  process.exit(0);
+}
+if (args.images) {
+  await timeImages(Number(args.runs));
   await close();
   process.exit(0);
 }
@@ -190,4 +202,216 @@ async function timeSwitches(reps = 3) {
   }
   console.log(`\ntheme switch, click to first pages painted (${reps} runs each, fonts over loopback):`);
   for (const row of rows) console.log(row);
+}
+
+/** Draws the three test images in the page as Files: `window.__images`. Pixels are made here, nothing is downloaded. */
+async function makeImages() {
+  return evaluate(`(async () => {
+    const shot = new OffscreenCanvas(1200, 800);
+    let x = shot.getContext('2d');
+    x.fillStyle = '#f4f4f2'; x.fillRect(0, 0, 1200, 800);
+    x.fillStyle = '#2b2d33'; x.fillRect(0, 0, 1200, 48);
+    x.fillStyle = '#e1e3e8'; x.fillRect(0, 48, 240, 752);
+    x.font = '16px sans-serif';
+    for (let i = 0; i < 24; i++) {
+      x.fillStyle = i % 5 === 0 ? '#3366cc' : '#333';
+      x.fillText('Row ' + i + ': the quick brown fox jumps over the lazy dog, 0123456789', 270, 90 + i * 28);
+      x.fillStyle = '#555'; x.fillText('Item ' + i, 20, 90 + i * 28);
+    }
+    const photo = new OffscreenCanvas(4000, 3000);
+    x = photo.getContext('2d');
+    const sky = x.createLinearGradient(0, 0, 0, 3000);
+    sky.addColorStop(0, '#6fa3d8'); sky.addColorStop(0.55, '#d9c9a3'); sky.addColorStop(1, '#4b5a2e');
+    x.fillStyle = sky; x.fillRect(0, 0, 4000, 3000);
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let i = 0; i < 400; i++) {
+      x.fillStyle = 'hsla(' + Math.floor(rand() * 360) + ', 40%, ' + Math.floor(30 + rand() * 40) + '%, 0.5)';
+      x.beginPath(); x.arc(rand() * 4000, 1500 + rand() * 1500, 20 + rand() * 200, 0, 7); x.fill();
+    }
+    const grain = x.getImageData(0, 0, 4000, 3000);
+    for (let i = 0; i < grain.data.length; i += 4) {
+      const n = (rand() - 0.5) * 40;
+      grain.data[i] += n; grain.data[i + 1] += n; grain.data[i + 2] += n;
+    }
+    x.putImageData(grain, 0, 0);
+    const bars = Array.from({ length: 40 }, (_, i) => '<rect x="' + (40 + i * 14) + '" y="' + (300 - 40 - ((i * 37) % 200)) + '" width="10" height="' + ((i * 37) % 200) + '" fill="#4a7bd0"/>').join('');
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="320"><rect width="640" height="320" fill="#fff"/>' + bars +
+      '<line x1="36" y1="260" x2="620" y2="260" stroke="#333"/><text x="40" y="290" font-family="sans-serif" font-size="14">Bars by week</text></svg>';
+    window.__images = {
+      'screenshot.png': new File([await shot.convertToBlob({ type: 'image/png' })], 'screenshot.png', { type: 'image/png' }),
+      'photo.jpg': new File([await photo.convertToBlob({ type: 'image/jpeg', quality: 0.9 })], 'photo.jpg', { type: 'image/jpeg' }),
+      'chart.svg': new File([svg], 'chart.svg', { type: 'image/svg+xml' }),
+    };
+    return Object.fromEntries(Object.entries(__images).map(([k, f]) => [k, f.size]));
+  })()`);
+}
+
+/**
+ * Pastes `name` through the app's own paste handler, as a new paragraph after the one that starts with its anchor.
+ * Resolves on the paint after the first pages that show it. Without images, a paragraph of words goes there instead,
+ * so both sides type into a document that compiled the same number of edits.
+ */
+function pasteImage(name, withImages) {
+  const anchor = { 'screenshot.png': 'The classic advice is', 'photo.jpg': 'Strict rhythm is hard', 'chart.svg': 'A *point* in modern' }[name];
+  return evaluate(`new Promise((resolve) => {
+    const view = document.querySelector('.cm-content').cmTile.view;
+    const text = view.state.doc.toString();
+    const at = text.indexOf('\\n', text.indexOf(${JSON.stringify(anchor)}));
+    if (!${withImages}) {
+      view.dispatch({ changes: { from: at, insert: '\\n\\nA paragraph where an image would be.' } });
+      resolve(null);
+      return;
+    }
+    view.dispatch({ changes: { from: at, insert: '\\n\\n' }, selection: { anchor: at + 2 } });
+    const t0 = performance.now();
+    const seen = __log.length;
+    const on = ({ data }) => {
+      if (data.kind !== 'pages' || !data.images.includes(${JSON.stringify(name)})) return;
+      __worker.removeEventListener('message', on);
+      requestAnimationFrame(() => setTimeout(() => resolve({ ms: performance.now() - t0, compileMs: data.compileMs, rasterMs: data.rasterMs, pages: data.bitmaps.map((b) => b.index), final: data.final })));
+    };
+    __worker.addEventListener('message', on);
+    const data = new DataTransfer();
+    data.items.add(__images[${JSON.stringify(name)}]);
+    document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  })`);
+}
+
+function settledFinal() {
+  return until('final pages', () => evaluate(`__shown?.final && document.querySelectorAll('#pages canvas[width]').length > 1`), 600);
+}
+
+/** The page a Markdown offset renders on, asked of the worker like the editor's cursor does. */
+function pageOf(offset) {
+  return evaluate(`new Promise((resolve) => {
+    const on = ({ data }) => data.kind === 'located' && data.id === 1e9 && (__worker.removeEventListener('message', on), resolve(data.spot?.page ?? null));
+    __worker.addEventListener('message', on);
+    __worker.postMessage({ kind: 'locate', id: 1e9, offset: ${offset} });
+  })`);
+}
+
+/** The preview page that shows the most of the photo's sky blue. */
+function photoShownOn() {
+  return evaluate(`(() => {
+    const counts = [...document.querySelectorAll('#pages canvas')].map((canvas) => {
+      if (!canvas.width) return 0;
+      const ctx = Object.assign(document.createElement('canvas'), { width: canvas.width, height: canvas.height }).getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(canvas, 0, 0);
+      const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 111) + Math.abs(d[i + 1] - 163) + Math.abs(d[i + 2] - 216) < 60) n++;
+      return n;
+    });
+    return counts.indexOf(Math.max(...counts));
+  })()`);
+}
+
+/**
+ * The worker's V8 heap after a GC, and the largest renderer process's RSS, which holds the page, its worker, both wasm
+ * memories and decoded images. The heap's backing stores leave out wasm memory, so the RSS is the number for images.
+ */
+async function memory() {
+  const attached = new Promise((resolve) => {
+    const on = (m) => {
+      if (m.method !== 'Target.attachedToTarget' || m.params.targetInfo.type !== 'worker') return;
+      page.listeners.delete(on);
+      resolve(m.params.sessionId);
+    };
+    page.listeners.add(on);
+  });
+  await page.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  const sessionId = await attached;
+  const within = (promise) => Promise.race([promise, sleep(5000).then(() => null)]);
+  await within(page.send('HeapProfiler.enable', {}, sessionId));
+  const collected = (await within(page.send('HeapProfiler.collectGarbage', {}, sessionId))) !== null;
+  const heap = await within(page.send('Runtime.getHeapUsage', {}, sessionId));
+  await page.send('Target.detachFromTarget', { sessionId });
+  await page.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
+  const { processInfo } = await browser.send('SystemInfo.getProcessInfo');
+  const rss = processInfo
+    .filter((p) => p.type === 'renderer')
+    .map((p) => {
+      try {
+        return Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${p.id}/status`, 'utf8'))[1]) / 1024;
+      } catch {
+        return 0;
+      }
+    });
+  const mb = (bytes) => bytes / 1048576;
+  return { collected, heapUsed: mb(heap?.usedSize ?? NaN), heapTotal: mb(heap?.totalSize ?? NaN), backing: mb(heap?.backingStorageSize ?? NaN), rendererRss: Math.max(...rss) };
+}
+
+async function timeImages(runs) {
+  const spots = {
+    title: { anchor: '# A field guide', keys: [...'the quick brown fox '] },
+    'photo page': { anchor: 'A text face has one job', keys: [...' word'] },
+  };
+  const rows = [];
+  const inserts = [];
+  const memories = { without: [], with: [] };
+  for (let run = 0; run < runs; run++) {
+    for (const withImages of run % 2 === 0 ? [false, true] : [true, false]) {
+      for (const [label, spot] of Object.entries(spots)) {
+        await load({ line: 1 });
+        await settledFinal();
+        await evaluate(`__log = []; __failed = []`);
+        if (withImages) {
+          const sizes = await makeImages();
+          if (run === 0 && label === 'title') console.log(`images: ${Object.entries(sizes).map(([n, b]) => `${n} ${(b / 1048576).toFixed(2)} MB`).join(', ')}`);
+          if (label === 'title') memories.without.push(await memory());
+        }
+        for (const name of ['screenshot.png', 'chart.svg', 'photo.jpg']) {
+          const pasted = await pasteImage(name, withImages);
+          if (name === 'photo.jpg' && pasted) inserts.push(pasted);
+          await sleep(300);
+          await settledFinal();
+        }
+        await sleep(1000);
+        if (withImages && label === 'title') memories.with.push(await memory());
+        const where = await evaluate(`(() => {
+          const view = document.querySelector('.cm-content').cmTile.view;
+          const text = view.state.doc.toString();
+          const at = text.indexOf('\\n', text.indexOf(${JSON.stringify(spot.anchor)}));
+          view.dispatch({ selection: { anchor: at } });
+          view.focus();
+          return { at };
+        })()`);
+        const photoPage = withImages && label === 'photo page' ? [await pageOf(where.at), await photoShownOn()] : null;
+        await sleep(500);
+        const typedFrom = await evaluate('__log.length');
+        await type(spot);
+        const meter = (await evaluate(`document.getElementById('overlay').innerText`)).match(/p50 ([\d.–]+)\s+p95 ([\d.–]+) ms\s+\((\d+)\)/);
+        const log = await evaluate(`(() => {
+          const typed = __log.slice(${typedFrom});
+          const firsts = typed.filter((m, i) => i === 0 || m.rev !== typed[i - 1].rev);
+          const median = (xs) => [...xs].sort((a, b) => a - b)[xs.length >> 1] ?? NaN;
+          return { failed: __failed.length, images: __log.at(-1)?.images ?? [], compile: median(firsts.map((m) => m.compileMs)), raster: median(firsts.map((m) => m.rasterMs)), redrawn: median(firsts.map((m) => m.pages.length)) };
+        })()`);
+        const runsOnPage = await evaluate(`new Promise((resolve) => {
+          const on = ({ data }) => data.kind === 'runs' && data.id === 2e9 && (__worker.removeEventListener('message', on), resolve(data.pages.map((p) => p.runs.length)));
+          __worker.addEventListener('message', on);
+          __worker.postMessage({ kind: 'runs', id: 2e9 });
+        })`);
+        const typedPage = await pageOf(await evaluate(`document.querySelector('.cm-content').cmTile.view.state.selection.main.head`));
+        log.runs = runsOnPage[typedPage];
+        rows.push({ run, withImages, label, p50: Number(meter[1]), p95: Number(meter[2]), painted: Number(meter[3]), failed: log.failed, images: log.images.length, photoPage });
+        console.log(`run ${run + 1} ${withImages ? 'with images   ' : 'without images'} ${label.padEnd(10)} p50 ${meter[1]}  p95 ${meter[2]} ms (${meter[3]} keys painted)  compile ${log.compile.toFixed(1)} raster ${log.raster.toFixed(1)} ms, ${log.redrawn} pages (medians of each rev's first message)  images ${log.images.length}  failed ${log.failed}, ${log.runs} text runs on page ${typedPage + 1}${photoPage ? `  typing on page ${photoPage[0] + 1}, the photo on page ${photoPage[1] + 1}` : ''}`);
+      }
+    }
+  }
+  const median = (xs) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
+  console.log(`\nmedian of ${runs} runs (range):`);
+  for (const label of Object.keys(spots)) {
+    for (const withImages of [false, true]) {
+      const r = rows.filter((x) => x.label === label && x.withImages === withImages);
+      const span = (k) => `${median(r.map((x) => x[k])).toFixed(1)} (${Math.min(...r.map((x) => x[k])).toFixed(1)}–${Math.max(...r.map((x) => x[k])).toFixed(1)})`;
+      console.log(`  ${label.padEnd(10)} ${withImages ? 'with images   ' : 'without images'} p50 ${span('p50')}  p95 ${span('p95')} ms`);
+    }
+  }
+  console.log(`\npasting the 4000x3000 photo, paste to the paint after its first pages (${inserts.length} runs):`);
+  for (const i of inserts) console.log(`  ${i.ms.toFixed(0)} ms, compile ${i.compileMs.toFixed(0)} ms, raster ${i.rasterMs.toFixed(0)} ms of pages ${i.pages.map((p) => p + 1).join(', ')}${i.final ? '' : ' (more pages drawn after)'}`);
+  console.log('\nmemory, MB: worker heap used / total / backing stores after a GC, largest renderer RSS');
+  const fmt = (m) => `${m.heapUsed.toFixed(1)} / ${m.heapTotal.toFixed(1)} / ${m.backing.toFixed(1)}${m.collected ? '' : ' (GC did not answer)'}, RSS ${m.rendererRss.toFixed(0)}`;
+  memories.without.forEach((m, i) => console.log(`  run ${i + 1}: before the images ${fmt(m)}  after ${fmt(memories.with[i])}`));
 }

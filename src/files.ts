@@ -139,9 +139,9 @@ const unsavedImages = (file: DocFile, images: ReadonlyMap<ImagePath, Blob>, refe
 const withSaved = (file: DocFile, paths: Iterable<ImagePath>): DocFile => ({ ...file, savedImages: new Set([...file.savedImages, ...paths]) });
 
 /**
- * Writes the folder the file is in, when liveprint has it or the user chooses it now, so that unsaved images can be
- * written beside it. Asking for the folder takes the click or key of the save, so it comes before any other ask:
- * one grant on the folder covers the file too. Null when there is nothing to write or no folder to write to.
+ * The folder to write unsaved images into: the file's own, when liveprint has it, or the one the user chooses now.
+ * Asking for the folder takes the click or key of the save, so it comes before any other ask: one grant on the
+ * folder covers the file too. Null when there is nothing to write or no folder to write to.
  */
 async function folderToWrite(file: DocFile, unsaved: readonly ImagePath[]): Promise<FileSystemDirectoryHandle | null> {
   if (unsaved.length === 0) return null;

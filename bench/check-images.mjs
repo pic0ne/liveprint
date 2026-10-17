@@ -4,7 +4,7 @@
 // shows an image where that colour is. As in check-files.mjs, CDP cannot answer the File System Access pickers, so
 // the API run replaces showOpenFilePicker, showSaveFilePicker and showDirectoryPicker with handles from the origin
 // private file system; reading, writing and the read-back are real. The fallback run deletes the pickers.
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -349,8 +349,9 @@ await key('o', { ctrl: true });
 await until('notes.md opened fresh', async () => (await state()).name === 'notes.md');
 await settled();
 s = await state();
-first = await firstFrame();
-check('opened fresh, its image is not found, says the bar, and the preview shows a frame instead', s.notice === '1 image not found' && first && !first.page.found.magenta, s);
+// notes.md has the text copy.md had, so the new edit may redraw nothing: the frame is in the last page 1 drawn since.
+const shownNow = await evaluate(`__frames.slice(__since).findLast((f) => f.pages.some((p) => p.index === 0))?.pages.find((p) => p.index === 0)`);
+check('opened fresh, its image is not found, says the bar, and the preview shows a frame instead', s.notice === '1 image not found' && shownNow && !shownNow.found.magenta, { s, found: shownNow?.found });
 await markFrames();
 await clickAt(await centreOf('#choose-folder'));
 await until('image read from the folder', async () => (await state()).notice === '');
@@ -456,12 +457,12 @@ const runAt = (text) => {
   const run = runs.find((r) => r.text.includes(text));
   return run && onPage((run.x + run.w / 2) / width, (run.y + run.h / 2) / height);
 };
+/** Where a click on the preview puts the editor's cursor, which starts at 0. */
 async function clickPreview(point) {
-  const before = await evaluate(`${view}.state.selection.main.head`);
   await evaluate(`${view}.dispatch({ selection: { anchor: 0 } })`);
   await clickAt(point);
   await until('cursor moved', async () => (await evaluate(`${view}.state.selection.main.head`)) !== 0, 50).catch(() => null);
-  return [before, await evaluate(`${view}.state.selection.main.head`)][1];
+  return evaluate(`${view}.state.selection.main.head`);
 }
 const inside = (head, text) => head >= LINKED.indexOf(text) && head <= LINKED.indexOf(text) + text.length;
 let head = await clickPreview(runAt('Before'));
@@ -474,6 +475,7 @@ head = await clickPreview(onPage((l + r) / 2, (t + b) / 2));
 console.log(`     a click on the image itself puts the cursor at offset ${head} of ${LINKED.length}: ${J(LINKED.slice(Math.max(0, head - 12), head))}|${J(LINKED.slice(head, head + 12))}`);
 
 await close();
+rmSync(dir, { recursive: true, force: true });
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exit(failures ? 1 : 0);
 
