@@ -13,7 +13,8 @@
     "record:demo": "vite build --logLevel error && node bench/record-demo.mjs",
     "bench:browser": "vite build --logLevel error && node bench/browser.mjs",
     "check:linking": "vite build --logLevel error && node bench/check-linking.mjs --theme book && node bench/check-linking.mjs --theme paper && node bench/check-linking.mjs --theme modern",
-    "bench:load": "vite build --logLevel error && node bench/load.mjs"
+    "bench:load": "vite build --logLevel error && node bench/load.mjs",
+    "check:files": "vite build --logLevel error && node bench/check-files.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
