@@ -76,6 +76,8 @@ export function createEditor(
     EditorView.lineWrapping,
     theme,
     jumpedLine,
+    // A dropped file opens as the document, which the app handles, instead of having its text inserted.
+    EditorView.domEventHandlers({ drop: (e) => (e.dataTransfer?.files.length ?? 0) > 0 }),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) onDocChange(update.state.doc.toString());
       if (update.docChanged || update.selectionSet) onCursor();

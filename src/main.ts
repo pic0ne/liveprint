@@ -1,6 +1,6 @@
 import { type Doc, documentTitle, isEdited, pdfName, untitled } from './doc';
 import { createEditor, jumpTo } from './editor';
-import { download, openFile, saveFile } from './files';
+import { download, droppedFile, openFile, saveFile } from './files';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
@@ -254,6 +254,19 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     void save(e.shiftKey);
   }
+});
+
+// A file dropped anywhere opens. Every file drop is cancelled, so the browser never navigates away to the file.
+window.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  const dropped = droppedFile(e.dataTransfer);
+  if (dropped && mayDiscard()) void fileAction('open the dropped file', async () => openDoc(await dropped));
 });
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);

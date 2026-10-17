@@ -1,4 +1,4 @@
-import type { Doc, DocFile } from './doc';
+import { type Doc, type DocFile, isMarkdown } from './doc';
 
 // The parts of the File System Access API that liveprint uses and TypeScript's DOM library lacks. Chromium only.
 interface FilePickerType {
@@ -14,6 +14,9 @@ declare global {
   interface FileSystemHandle {
     queryPermission?(descriptor: { mode: 'readwrite' }): Promise<Permission>;
     requestPermission?(descriptor: { mode: 'readwrite' }): Promise<Permission>;
+  }
+  interface DataTransferItem {
+    getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
   }
 }
 
@@ -91,4 +94,22 @@ export async function saveFile(text: string, file: DocFile, as: boolean): Promis
     if (cancelled(error)) return null;
     throw error;
   }
+}
+
+/**
+ * The first Markdown file in a drop, read through a file handle when the browser gives one, so that saving writes
+ * back to it. Null when the drop has no such file. Call it during the drop event: its items are gone once that ends.
+ */
+export function droppedFile(data: DataTransfer): Promise<Doc> | null {
+  const item = [...data.items].find((it) => {
+    const file = it.kind === 'file' ? it.getAsFile() : null;
+    return file !== null && isMarkdown(file);
+  });
+  if (!item) return null;
+  const file = item.getAsFile()!;
+  const handle = item.getAsFileSystemHandle?.();
+  return (async () => {
+    const h = await handle?.catch(() => null);
+    return h instanceof FileSystemFileHandle ? read(h) : readCopy(file);
+  })();
 }
