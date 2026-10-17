@@ -201,13 +201,14 @@ button:focus-visible {
 /* A menu over the page, the one thing here that casts a shadow. */
 .settings-panel {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   right: 0;
   z-index: 10;
   width: max-content;
   display: grid;
   gap: 12px;
   padding: 12px;
+  border: 1px solid var(--divider);
   border-radius: 8px;
   background: var(--panel);
   box-shadow:
