@@ -11,7 +11,7 @@
   --divider-active: #c4c4c9;
   --ground: #dcdce0;
   --ink: #18181b;
-  --muted: #71717a;
+  --muted: #6b6b73;
   --link: #1f56b8;
   --code: #0f6e5a;
   --selection: #d5e0f5;
@@ -46,8 +46,8 @@
     --button-quiet: #26262a;
     --overlay: #1f1f22;
     --failure: #f0a07a;
-    --accent: #3b7be8;
-    --accent-hover: #5590f0;
+    --accent: #2c6bd9;
+    --accent-hover: #245cc0;
     --on-accent: #ffffff;
     --panel: #26262a;
     --segment-on: #46464d;
