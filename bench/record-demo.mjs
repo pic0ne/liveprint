@@ -1,4 +1,4 @@
-// Records docs/demo.gif: typing with the live preview and the latency overlay, then two-way linking in both directions.
+// Records docs/demo.gif: typing with the live preview and the latency overlay, pasting an image, then two-way linking in both directions.
 // Headless Chrome screencast against `vite preview` of dist/ (`npm run record:demo` builds it), encoded with ffmpeg.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -83,7 +83,24 @@ await sleep(700);
 await click(await editorPoint('it stays visible.'));
 await sleep(400);
 await type(' Every keystroke reflows these pages, math included: $a^2 + b^2 = c^2$.');
-await sleep(1200);
+await sleep(900);
+
+await key('Enter', 'Enter', 13, 2, 120);
+await evaluate(`(async () => {
+  const canvas = new OffscreenCanvas(960, 330);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#f4f2ee';
+  ctx.fillRect(0, 0, 960, 330);
+  [52, 66, 75, 61, 45].forEach((chars, i) => {
+    ctx.fillStyle = i === 2 ? '#2563d0' : '#b9b5ad';
+    ctx.fillRect(90 + i * 165, 300 - chars * 3.4, 120, chars * 3.4);
+  });
+  const file = new File([await canvas.convertToBlob({ type: 'image/png' })], 'line-length.png', { type: 'image/png' });
+  const data = new DataTransfer();
+  data.items.add(file);
+  document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+})()`);
+await sleep(1600);
 
 await click(await previewPoint('The measure'));
 await sleep(1400);

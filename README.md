@@ -4,7 +4,7 @@
 
 Write Markdown on the left and see the real PDF pages on the right while you type. The preview is the typeset document itself, not an HTML approximation: Typst compiles it in your browser, and **Download .pdf** gives you the same pages you see.
 
-Everything runs on the client. There is no server. After the first visit the app works offline, and it opens and saves real `.md` files on your disk.
+Everything runs on the client. There is no server. After the first visit the app works offline, and it opens and saves real `.md` files on your disk, with their images.
 
 ## Speed
 
@@ -91,13 +91,13 @@ Typing latency did not change. Over three alternating runs of `npm run bench:bro
 
 ## Files
 
-**Open** (Ctrl+O, or Cmd+O on a Mac) reads a Markdown file. **Save** (Ctrl+S) writes it back to the same file. **Shift+Ctrl+S**, or Shift-click on **Save**, saves it under a new name. You can also drop a `.md`, `.markdown` or `.txt` file anywhere on the app to open it. The bar shows the file's name, and **Edited** while the editor's text differs from what was last opened or saved. Undoing back to that text clears **Edited** again. **Download .pdf** names the PDF after the file, so `notes.md` becomes `notes.pdf`.
+**Open** (Ctrl+O, or Cmd+O on a Mac) reads a Markdown file. **Save** (Ctrl+S) writes it back to the same file. **Shift+Ctrl+S**, or Shift-click on **Save**, saves it under a new name. You can also drop a `.md`, `.markdown` or `.txt` file anywhere on the app to open it, together with its images if you drop them with it. The bar shows the file's name, and **Edited** while the editor's text differs from what was last opened or saved. Undoing back to that text clears **Edited** again. **Download .pdf** names the PDF after the file, so `notes.md` becomes `notes.pdf`.
 
 In Chrome and Edge, liveprint uses the File System Access API and keeps the file handle, so **Save** writes to the file you opened without asking again. Firefox and Safari do not have the API. There, **Open** uses the browser's file dialog and **Save** downloads the file under its name.
 
 Opening another file while there are unsaved changes asks first. So does closing or reloading the tab.
 
-liveprint restores the last document when you come back: its text, its name, whether it was edited, and in Chrome its file handle. It keeps a copy in the browser's IndexedDB while you type, one write at a time. This protects against the losses a leave-page warning cannot catch, such as a crash, a closed laptop or a tab the browser discarded. The copy stays in this browser only, so **Edited** still means the file on disk is behind. After a reload, Chrome may ask once for permission to write to the file again.
+liveprint restores the last document when you come back: its text, its name, whether it was edited, its images, and in Chrome its file handle and folder. It keeps a copy in the browser's IndexedDB while you type, one write at a time. This protects against the losses a leave-page warning cannot catch, such as a crash, a closed laptop or a tab the browser discarded. The copy stays in this browser only, so **Edited** still means the file on disk is behind. After a reload, Chrome may ask once for permission to write to the file again.
 
 To check opening, saving, restoring and dropping in headless Chrome, with the File System Access API and without it, run:
 
@@ -106,6 +106,59 @@ npm run check:files
 ```
 
 CDP cannot answer Chrome's file pickers, so with the API the check returns files from the origin private file system in place of the picker. Reading, writing and reading back are real. Without the API, the check chooses a real file through the file input and compares the bytes of the real download.
+
+## Images
+
+Paste an image, or drop an image file on the editor, and liveprint writes `![](image.png)` at the cursor or where you dropped it. The image is already in the first preview drawn after the paste. An image alone in its paragraph is centred on a line of its own at its natural size, and Typst scales it down to the column when it is wider. An image inside a sentence sits on the line. PNG, JPEG, GIF, WebP and SVG work. A file of any other type is refused, and the message names the types that work.
+
+A pasted file keeps its name, with spaces and unsafe characters changed to `-`. When the document already has a different image under that name, the new one becomes `image-2.png`, then `image-3.png`. Pasting the same bytes again reuses the first name.
+
+### Where the image files go
+
+The Markdown records a path relative to the `.md` file, and the image file goes beside it, as VS Code does by default. GitHub, editors and other Markdown tools then show the same images.
+
+- **In this browser.** IndexedDB keeps every image of the document in a store of its own, which liveprint writes only when the images change. Typing never writes image bytes. A reload restores the text and the images without the network.
+- **On disk, with the File System Access API** (Chrome and Edge). **Save** writes the `.md` and every image it names that is not in its folder yet. A file handle cannot reach its folder, so the first save of a file with images asks for the folder that holds it. liveprint refuses a folder that does not contain the file. After that, **Save** writes new images without asking.
+- **On disk, without the API** (Firefox and Safari). **Save** downloads the `.md` and then each image that was not downloaded with it before, so they land side by side in your downloads folder.
+
+A browser lets one click open only one picker. The first save of an untitled document uses that click for the save picker, so its images are not written yet. The bar then says **1 image not saved beside notes.md** next to a **Choose folder** button, and **Save** asks for the folder the next time.
+
+### Opening a file that has images
+
+When the Markdown names an image that liveprint does not have, the preview shows a dashed frame with the image's alt text, or its path. The bar says **1 image not found** next to **Choose folder**. With the API, the button asks for the file's folder and reads the images from it. liveprint keeps that folder, so when you type `![](plot.png)` and `plot.png` is in the folder, the image shows at once. Without the API, the button reads the folder through the browser's folder dialog.
+
+Remote images (`https://…`) and `data:` URLs are not loaded, and neither are paths that leave the folder, such as `../shared/x.png`. They show as a frame too.
+
+### Linking around an image
+
+An image prints no Markdown text, so linking passes over it. A click on the text before or after an image puts the cursor in that text. A click on the image itself puts the cursor at the end of the text printed before it.
+
+### SVG in the preview
+
+typst.ts draws an SVG image with `new Image()`, which a worker does not have, and Chrome cannot decode SVG in a worker at all. The main thread therefore draws each SVG at 2048 pixels along its longer side and sends that drawing to the worker, where a stand-in `Image` copies it. Only the preview uses the drawing. Typst lays out and prints the SVG itself, so the PDF keeps it as vectors.
+
+### Cost
+
+`node bench/browser.mjs --images` types in the sample with three pasted images and without them, in alternating runs. The images are a 1200×800 PNG of 0.23 MB, a 4000×3000 JPEG photo of 4.42 MB, and an SVG chart. Each value is the median of three runs of 110 keystrokes:
+
+| Edit | Without images, p50 / p95 | With images, p50 / p95 |
+|---|---|---|
+| Typing in the title | 41.6 / 55.3 ms | 28.8 / 46.3 ms |
+| Typing on the page that holds the photo | 46.7 / 56.6 ms | 32.0 / 50.3 ms |
+
+Typing did not get slower with images. It got faster because the images push text off the page you type on, and drawing a page takes time for each run of text on it. Page 1 holds 32 runs of text without the images and 25 with them. The photo's page holds 29, and the same paragraph without images sits on a page with 79. Compiling stayed at 7.5 to 8.2 ms per keystroke. Drawing the photo again on each keystroke costs little: its page took 14.0 ms to draw, and page 1, with 25 runs and no photo, took 12.6 ms.
+
+Pasting the photo is the expensive step. From the paste to the paint of its pages took 356 to 393 ms over six pastes, of which the first compile was 201 to 226 ms and drawing pages 2 to 4 was 124 to 132 ms. The keystrokes after it are back to the numbers in the table.
+
+The page's renderer process grew from 573 MB to 639 MB with the three images, in a fresh process. Earlier runs measured growth of 47 to 83 MB. The photo alone is 48 MB as decoded pixels, which is likely most of the growth, but no profile confirms that. The worker's JavaScript heap stays at about 3.4 MB, because the bytes live in WebAssembly memory.
+
+To check pasting, dropping, restoring, saving, finding images in a folder and the fallback path in headless Chrome, run:
+
+```bash
+npm run check:images
+```
+
+CDP cannot answer the file and folder pickers, so the check answers them with folders of the origin private file system, like `check:files`. It also reads each preview bitmap's pixels to confirm the image is in the first one drawn after a paste.
 
 ## Offline
 
@@ -151,17 +204,17 @@ Other scripts:
 - `npm test` runs the converter, linking, scheduler and compile tests.
 - `npm run build` type-checks and builds to `dist/`.
 - `npm run bench` compares compile cost of cmarker and the JavaScript converter in Node.
-- `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, and `--switch` measures choosing a theme.
+- `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, `--switch` measures choosing a theme, and `--images` compares typing with and without images.
 - `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
 - `npm run check:files` checks opening, saving, restoring and dropping files in headless Chrome.
+- `npm run check:images` checks pasting, dropping, restoring and saving images in headless Chrome.
 - `npm run bench:load` measures the time to the first page, cold and warm, in headless Chrome.
 - `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
 ## Status
 
-The pipeline works end to end, the speed is measured, and the editor and the preview link both ways. Not built yet:
+The pipeline works end to end, the speed is measured, the editor and the preview link both ways, and documents hold images. Not built yet:
 
-- Images. Image syntax renders its alt text for now.
 - Text selection in the preview.
 
 Known limits:
@@ -171,6 +224,11 @@ Known limits:
 - Only one document is restored. If two tabs are open, the one that wrote last is the one that comes back.
 - If a file changes on disk while it is open in liveprint, liveprint does not notice, and **Save** overwrites the change.
 - Only Chrome has been tested. The Firefox and Safari paths for opening and saving are tested in Chrome with the API removed.
+- The real file and folder pickers and permission prompts are not tested, because CDP cannot answer them. Asking again for a folder's permission after a reload is untested too.
+- Images in subfolders, such as `figures/plot.png`, are covered by unit tests only. Without the API, **Save** downloads `figures/plot.png` as `plot.png`.
+- A click on an image in the preview puts the cursor before the image, not on its Markdown.
+- An SVG in the preview is a 2048-pixel drawing, so it can blur at high zoom. The PDF is not affected.
+- Opening a document with images can compile the previous document once more before the new one. In five measured opens, the new document's first pages took 73 to 100 ms either way.
 - Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
 - Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking measures body text with the math font's upright letters, which have the same design, and the menu sets the name Paper in the math font.
 - If a theme's fonts fail to download, the preview stays in the previous theme and the menu keeps showing the chosen theme as loading. Choosing it again retries the download.
