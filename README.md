@@ -6,8 +6,6 @@ A Markdown editor that shows the real PDF pages as you type.
 
 The preview is the typeset document, not an HTML approximation. Typst compiles it in your browser, and **Download .pdf** saves the same pages you see. There is no server and no account, and nothing you write leaves your machine.
 
-## Typing never waits
-
 A keystroke reaches the typeset page in about 40 ms on a seven-page document. Compiling and drawing run in a Web Worker, only the pages that changed are redrawn, and a new edit replaces any edit still waiting to compile. Press **Alt+D** to see the timings live.
 
 ## What it does
