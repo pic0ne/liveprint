@@ -20,8 +20,8 @@ const highlight = HighlightStyle.define([
 const theme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'var(--editor)', color: 'var(--ink)' },
   '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': { fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: '14px', lineHeight: '1.6' },
-  '.cm-content': { padding: '24px 28px 40vh', maxWidth: '72ch', caretColor: 'var(--ink)' },
+  '.cm-scroller': { fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: '14px', lineHeight: '1.65' },
+  '.cm-content': { padding: '28px 32px 40vh', maxWidth: '72ch', caretColor: 'var(--ink)' },
   '.cm-cursor': { borderLeftColor: 'var(--ink)', borderLeftWidth: '2px' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--selection)' },
 });

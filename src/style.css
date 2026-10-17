@@ -71,6 +71,7 @@ body {
   background: var(--bar);
   color: var(--ink);
   font: 14px/1.4 system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 .bar {
@@ -78,7 +79,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 16px;
+  height: 48px;
+  padding: 0 16px;
   background: var(--bar);
 }
 
@@ -91,12 +93,14 @@ body {
 
 .wordmark {
   font-family: 'Libertinus Serif', serif;
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1;
 }
 
 .file-name {
   min-width: 0;
+  color: var(--ink);
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -315,7 +319,7 @@ button:focus-visible {
   height: 100%;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding: 24px;
+  padding: 32px;
 }
 
 .pages canvas {
@@ -326,7 +330,7 @@ button:focus-visible {
 }
 
 .pages canvas + canvas {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .overlay {
@@ -431,6 +435,8 @@ button:focus-visible {
   /* Two rows: the document's name gets the width a phone cannot spare beside the buttons. */
   .bar {
     position: relative;
+    height: auto;
+    padding: 8px 16px;
     flex-wrap: wrap;
     gap: 8px 12px;
   }
