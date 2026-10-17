@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import type { Rev } from '../protocol';
+import type { ImagePath } from '../images';
+import type { Bytes, Rev } from '../protocol';
 import type { ThemeId } from '../settings';
 import { Mailbox } from './mailbox';
 
@@ -8,6 +9,8 @@ const pdf = (rev: number) => ({ kind: 'pdf', rev: rev as Rev }) as const;
 const view = (widthPx: number) => ({ kind: 'view', widthPx, dpr: 1, visible: { first: 0, last: 0 } }) as const;
 const locate = (id: number) => ({ kind: 'locate', id, offset: id }) as const;
 const source = (id: number) => ({ kind: 'source', id, page: 0, fx: 0, fy: 0 }) as const;
+const image = (path: string, size: number | null) =>
+  ({ kind: 'image', path: path as ImagePath, bytes: size === null ? null : (new Uint8Array(size) as Bytes) }) as const;
 const settings = (theme: ThemeId) => ({ kind: 'settings', settings: { paper: 'a4', margins: 'normal', theme } }) as const;
 
 /** A mailbox whose compiles finish only when the test says so. */
@@ -29,6 +32,7 @@ function harness() {
     },
     edit: (e) => job(`edit ${e.rev}`)(),
     view: (v) => log.push(`view ${v.widthPx}`),
+    images: (changes) => log.push(`images ${[...changes].map(([path, bytes]) => `${path}=${bytes?.length ?? null}`).join(' ')}`),
     pdf: (rev) => job(`pdf ${rev}`)(),
     link: (request) => job(`${request.kind} ${request.id}`)(),
     raster: async () => {
@@ -180,5 +184,45 @@ test('settings go before a PDF request and linking, so both answer from the new 
   mailbox.receive(settings('paper'));
   for (let i = 0; i < 5; i++) await finishCurrent();
   expect(log).toEqual(['edit 1', 'settings paper', 'edit 1', 'pdf 1', 'locate 2']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('images coalesce per path to the newest bytes and apply before settings and the edit of the same burst, which compiles once', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  mailbox.receive(image('a.png', 3));
+  mailbox.receive(image('b.png', 5));
+  mailbox.receive(settings('paper'));
+  mailbox.receive(image('a.png', 4));
+  mailbox.receive(image('b.png', null));
+  mailbox.receive(edit(2));
+  for (let i = 0; i < 3; i++) await finishCurrent();
+  expect(log).toEqual(['edit 1', 'images a.png=4 b.png=null', 'settings paper', 'edit 2']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('an image on its own compiles the last edit again', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  await finishCurrent();
+  mailbox.receive(image('plot.png', 7));
+  await settle();
+  await finishCurrent();
+  expect(log).toEqual(['edit 1', 'images plot.png=7', 'edit 1']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('images sent while booting apply before the first edit, which compiles once', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.receive(image('cat.png', 2));
+  mailbox.receive(edit(1));
+  mailbox.booted();
+  await settle();
+  await finishCurrent();
+  expect(log).toEqual(['images cat.png=2', 'edit 1']);
   expect(mailbox.phase).toBe('idle');
 });

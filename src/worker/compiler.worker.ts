@@ -1,6 +1,7 @@
 import { CompileFormatEnum, createTypstFontBuilder, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import { convert } from '../convert/toTypst';
+import type { ImagePath } from '../images';
 import { type Advance, fittedEdges } from '../linking/edges';
 import { type Bytes, type FromWorker, firstRev, type LinkRequest, type Rev, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
@@ -63,6 +64,8 @@ const fonts = new FontFiles(fetchBytes);
 const installed = new Set<string>();
 /** Advances of the installed fonts the browser could load, by path. */
 const faces = new Map<string, Advance>();
+/** The images the compiler has, at `/images/<path>`. */
+const available = new Set<ImagePath>();
 /** What the compiler typesets with; null until the first settings arrive. */
 let applied: PageSettings | null = null;
 /** The newest settings asked for, which wait while their fonts download. */
@@ -82,6 +85,7 @@ function addFaces(paths: string[], advances: (Advance | null)[]): void {
 interface Compiled {
   rev: Rev;
   settings: PageSettings;
+  images: ImagePath[];
   convertMs: number;
   compileMs: number;
 }
@@ -147,7 +151,7 @@ async function applySettings(next: PageSettings): Promise<boolean> {
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const settings = applied!;
   const t0 = performance.now();
-  const { typst, pieces } = convert(markdown);
+  const { typst, pieces, images } = convert(markdown, available);
   const t1 = performance.now();
   compiler.addSource(MAIN_PATH, mainSource(preludeFor(settings), typst));
   try {
@@ -163,7 +167,7 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
     }
     raster.merge(result);
     linker.setDocument(pieces, edgesFor(settings.theme));
-    shown = { rev, settings, convertMs: t1 - t0, compileMs: t2 - t1 };
+    shown = { rev, settings, images, convertMs: t1 - t0, compileMs: t2 - t1 };
     await drawNext(shown, false);
   } catch (error) {
     post({ kind: 'failed', rev, diagnostics: [errorText(error)] });
@@ -212,8 +216,21 @@ async function answerLink(request: LinkRequest): Promise<void> {
   }
 }
 
+function applyImages(changes: ReadonlyMap<ImagePath, Bytes | null>): void {
+  for (const [path, bytes] of changes) {
+    if (bytes) {
+      compiler.mapShadow(`/images/${path}`, bytes);
+      available.add(path);
+    } else {
+      compiler.unmapShadow(`/images/${path}`);
+      available.delete(path);
+    }
+  }
+}
+
 const mailbox = new Mailbox({
   settings: applySettings,
+  images: applyImages,
   edit: compileEdit,
   view: (view) => raster.setView(view),
   pdf: compilePdf,

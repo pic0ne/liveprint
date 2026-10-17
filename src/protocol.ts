@@ -1,3 +1,4 @@
+import type { ImagePath } from './images';
 import type { PageRuns, Spot } from './linking/sourceIndex';
 import type { PageSettings } from './settings';
 
@@ -47,6 +48,8 @@ export type ToWorker =
   /** Sent before the first edit and on every change. */
   | { kind: 'settings'; settings: PageSettings }
   | { kind: 'edit'; rev: Rev; markdown: string }
+  /** An image the document can show, sent before the edit that references it. Null bytes remove it. */
+  | { kind: 'image'; path: ImagePath; bytes: Bytes | null }
   | { kind: 'pdf'; rev: Rev }
   | ({ kind: 'view' } & View)
   | LinkRequest;
@@ -60,6 +63,8 @@ export type FromWorker =
       settings: PageSettings;
       /** Every page, so the preview can reserve space for pages not drawn yet. */
       sizes: PageSize[];
+      /** Every local image this rev's Markdown references, shown or not, in document order. */
+      images: ImagePath[];
       /** Only the pages redrawn since the last message. */
       bitmaps: PageBitmap[];
       /** False while dirty pages of this rev are still waiting to be drawn. */

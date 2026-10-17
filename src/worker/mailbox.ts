@@ -1,4 +1,5 @@
-import type { LinkRequest, Rev, ToWorker, View } from '../protocol';
+import type { ImagePath } from '../images';
+import type { Bytes, LinkRequest, Rev, ToWorker, View } from '../protocol';
 import type { PageSettings } from '../settings';
 
 export type Edit = Extract<ToWorker, { kind: 'edit' }>;
@@ -12,6 +13,8 @@ export interface MailboxHandlers {
   edit(edit: Edit): Promise<void>;
   /** Bookkeeping only, applied between jobs so the next job draws at the new size. */
   view(view: View): void;
+  /** Gives the compiler each image's newest bytes, or takes it away for null. */
+  images(changes: ReadonlyMap<ImagePath, Bytes | null>): void;
   pdf(rev: Rev): Promise<void>;
   /** Answers one linking request. */
   link(request: LinkRequest): Promise<void>;
@@ -24,7 +27,9 @@ export interface MailboxHandlers {
 /**
  * Single-slot mailbox, latest wins, and the worker's only scheduler. An edit that arrives while booting or busy
  * replaces `pending`, so stale edits are never compiled. Settings coalesce the same way and run before the edit, so
- * a change and an edit in one burst compile once. A change on its own compiles the last edit again. A PDF request
+ * a change and an edit in one burst compile once. A change on its own compiles the last edit again. Images coalesce
+ * per path and apply before both, then compile the last edit again the same way, so an image sent ahead of the edit
+ * that references it is there when that edit compiles. A PDF request
  * runs after any pending edit, so it prints the newest text. Linking requests keep one slot per kind and run after
  * edits and PDFs, so they answer from the newest document. Dirty pages are drawn only when nothing else waits, one
  * batch per job, so an edit or a view that arrives meanwhile runs before the next batch.
@@ -36,6 +41,7 @@ export class Mailbox {
   /** The newest edit compiled, which a settings change compiles again. */
   #last: Edit | null = null;
   #view: View | null = null;
+  #images = new Map<ImagePath, Bytes | null>();
   #pdf: Rev | null = null;
   readonly #links = new Map<LinkRequest['kind'], LinkRequest>();
   readonly #handlers: MailboxHandlers;
@@ -61,6 +67,9 @@ export class Mailbox {
         this.#view = view;
         break;
       }
+      case 'image':
+        this.#images.set(message.path, message.bytes);
+        break;
       case 'pdf':
         this.#pdf = message.rev;
         break;
@@ -85,6 +94,12 @@ export class Mailbox {
         if (view) {
           this.#view = null;
           this.#handlers.view(view);
+        }
+        if (this.#images.size > 0) {
+          const images = this.#images;
+          this.#images = new Map();
+          this.#handlers.images(images);
+          this.#pending ??= this.#last;
         }
         const settings = this.#settings;
         const edit = this.#pending;
