@@ -453,6 +453,12 @@ button:focus-visible {
     row-gap: 6px;
   }
 
+  /* A zero basis keeps a long name from wrapping onto its own line; it grows into the width left, up to its own. */
+  .file-name {
+    flex: 1 1 0;
+    max-width: max-content;
+  }
+
   .image-notice {
     flex-basis: 100%;
   }
