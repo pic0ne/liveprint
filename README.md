@@ -73,7 +73,30 @@ To check both directions in headless Chrome, run:
 npm run check:linking
 ```
 
-It runs once for each theme. In each, it samples 28 to 36 words from every page, among them a table cell, a code token, a list item and a word right after inline math. It clicks each word in the preview and checks that the editor cursor lands inside it. Then it puts the cursor inside the word and checks that the bar in the preview lies inside the printed word. The printed word's box comes from the page's pixels, not from the text layer, so the check does not test the index against itself.
+It runs once for each theme. In each, it samples 29 to 37 words from every page, among them a table cell, a code token, a list item, a word right after inline math and a word of a formula that shows as typed. It clicks each word in the preview and checks that the editor cursor lands inside it. Then it puts the cursor inside the word and checks that the bar in the preview lies inside the printed word. The printed word's box comes from the page's pixels, not from the text layer, so the check does not test the index against itself.
+
+## Formulas that are not valid yet
+
+While you type a formula, its LaTeX is often not valid for a few keys, as in `\frac{1` before the second argument. That formula then shows as you typed it, between its dollar signs, in a grey monospace face, and the rest of the page keeps updating. A line in the corner of the preview says why, for example **A formula shows as typed: missing argument: den**. The key that makes the formula valid typesets it again. A click on the typed LaTeX puts the cursor in it, as on any other text.
+
+Typst stops at the first error, and a document cannot catch one, so the worker finds the formula from the error:
+
+1. The error points inside mitex. A hint after it points at the formula's call in the generated source, such as `mi("\\frac{1")`, by line and column.
+2. The worker reads the call's text at that place and marks it as rejected. Two formulas with the same LaTeX fail the same way, so the call's text is the key, and no positions need to be tracked.
+3. The converter shows every rejected call as typed, and the worker compiles again. A failed compile names only one formula, so this repeats until the compile succeeds, once for each formula newly rejected. It always ends, because each round removes one formula of the document from the compile.
+
+A rejected call stays rejected while the document still has it, so typing elsewhere costs no extra compile. Any other failed compile, which liveprint itself should never cause, still keeps the last good pages and shows the error.
+
+`node bench/browser.mjs --math` empties each of the sample's 16 formulas, keeping its dollar signs, and types its 694 characters of LaTeX back one key at a time, 150 ms apart:
+
+| Keys | Before | After |
+|---|---|---|
+| Keys that leave a formula not valid | 240 of 694 failed to compile. The preview caught up 664 ms later at p50, 3.8 s at p95 | 0 failed. 48.6 ms at p50, 62.5 ms at p95 |
+| Other keys in the formulas | 42.1 ms at p50, 54.7 ms at p95 | 41.9 ms at p50, 55.7 ms at p95 |
+
+Before is one run and after is two. Both found the same 240 keys, the before side through the failed compiles and the after side through the formulas shown as typed. A key in a formula that is not valid costs about 7 ms more, because it converts and compiles twice. Its compile time, the failed compile and the good one together, was 11.4 ms at p50 against 8.2 ms for the other keys.
+
+Ordinary typing did not change. Over three alternating runs per side of `npm run bench:browser`, typing in the title measured 43.3 to 47.1 ms at p50 before and 43.9 to 45.6 ms after. The reflowing edit measured 27.3 to 30.3 ms before and 25.8 to 32.3 ms after. A compile that succeeds runs exactly as it did.
 
 ## Page settings
 
@@ -204,7 +227,7 @@ Other scripts:
 - `npm test` runs the converter, linking, scheduler and compile tests.
 - `npm run build` type-checks and builds to `dist/`.
 - `npm run bench` compares compile cost of cmarker and the JavaScript converter in Node.
-- `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, `--switch` measures choosing a theme, and `--images` compares typing with and without images.
+- `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, `--switch` measures choosing a theme, `--images` compares typing with and without images, and `--math` types the sample's formulas one key at a time.
 - `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
 - `npm run check:files` checks opening, saving, restoring and dropping files in headless Chrome.
 - `npm run check:images` checks pasting, dropping, restoring and saving images in headless Chrome.
@@ -213,7 +236,7 @@ Other scripts:
 
 ## Status
 
-The pipeline works end to end, the speed is measured, the editor and the preview link both ways, and documents hold images. Not built yet:
+The pipeline works end to end, the speed is measured, the editor and the preview link both ways, documents hold images, and a formula that is not valid yet no longer stops the preview. Not built yet:
 
 - Text selection in the preview.
 
@@ -232,7 +255,7 @@ Known limits:
 - Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
 - Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking measures body text with the math font's upright letters, which have the same design, and the menu sets the name Paper in the math font.
 - If a theme's fonts fail to download, the preview stays in the previous theme and the menu keeps showing the chosen theme as loading. Choosing it again retries the download.
-- A LaTeX formula that is not valid yet, such as `\frac{1` while you type, stops the compile. The preview keeps the last good pages and shows the error until the formula is valid again.
+- A formula that shows as typed also prints as typed in **Download .pdf**.
 
 ## Licence
 

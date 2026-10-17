@@ -131,8 +131,8 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
           if (data.kind === 'failed') __keys.failed.push(data.rev);
           if (data.kind === 'pages' && data.mathErrors?.length) __keys.broken.push(data.rev);
           if (data.kind === 'pages' && __keys.painted.at(-1)?.rev !== data.rev) {
-            const rev = data.rev;
-            requestAnimationFrame(() => setTimeout(() => __keys.painted.push({ rev, at: performance.now() })));
+            const { rev, compileMs } = data;
+            requestAnimationFrame(() => setTimeout(() => __keys.painted.push({ rev, compileMs, at: performance.now() })));
           }
           if (data.kind === 'located') __pages.located++;
         });
@@ -468,6 +468,7 @@ async function timeMath(runs) {
         ...(await evaluate(`__keys.edits.slice(${typedFrom}).map(({ rev, at }) => ({
           rev,
           ms: (__keys.painted.find((p) => p.rev >= rev)?.at ?? NaN) - at,
+          compileMs: __keys.painted.find((p) => p.rev === rev)?.compileMs ?? NaN,
           failed: __keys.failed.includes(rev),
           broken: __keys.failed.includes(rev) || __keys.broken.includes(rev),
         }))`)),
@@ -480,7 +481,8 @@ async function timeMath(runs) {
     const sorted = xs.filter(Number.isFinite).sort((a, b) => a - b);
     return sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)].toFixed(1) : '–';
   };
-  const row = (label, xs) => console.log(`  ${label.padEnd(28)} ${String(xs.length).padStart(4)} keys  p50 ${pct(xs.map((k) => k.ms), 0.5)}  p95 ${pct(xs.map((k) => k.ms), 0.95)} ms`);
+  const row = (label, xs) =>
+    console.log(`  ${label.padEnd(28)} ${String(xs.length).padStart(4)} keys  p50 ${pct(xs.map((k) => k.ms), 0.5)}  p95 ${pct(xs.map((k) => k.ms), 0.95)} ms, compile p50 ${pct(xs.map((k) => k.compileMs), 0.5)} ms`);
   console.log(`\ntyping ${formulas.length} formulas of the sample, ${runs} runs, keystroke to preview:`);
   row('keys in a broken formula', keys.filter((k) => k.broken));
   row('keys in a valid formula', keys.filter((k) => !k.broken));
