@@ -309,9 +309,13 @@ button:focus-visible,
   pointer-events: none;
 }
 
+.overlay .failure,
+.overlay .notice {
+  white-space: normal;
+}
+
 .overlay .failure {
   color: var(--failure);
-  white-space: normal;
 }
 
 /* Where the editor's cursor renders. Laid over the page, never in the way of a click. */

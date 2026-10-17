@@ -68,6 +68,8 @@ export type FromWorker =
       sizes: PageSize[];
       /** Every local image this rev's Markdown references, shown or not, in document order. */
       images: ImagePath[];
+      /** Why mitex rejected each formula shown as typed, in document order. */
+      mathErrors: string[];
       /** Only the pages redrawn since the last message. */
       bitmaps: PageBitmap[];
       /** False while dirty pages of this rev are still waiting to be drawn. */

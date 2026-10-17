@@ -1,11 +1,12 @@
 import { CompileFormatEnum, createTypstFontBuilder, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
-import { convert } from '../convert/toTypst';
+import type { MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
 import { type Advance, fittedEdges } from '../linking/edges';
 import { type Bytes, type FromWorker, firstRev, type LinkRequest, type Rev, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
-import { createCompiler, MAIN_PATH, mainSource } from '../typst/compiler';
+import { compileMarkdown, type Diagnostic } from '../typst/compileMarkdown';
+import { createCompiler, MAIN_PATH } from '../typst/compiler';
 import { FONT_FILES, PACKAGE_FILES } from '../typst/files';
 import { preludeFor, THEMES } from '../typst/themes';
 import { measureFaces } from './advances';
@@ -66,6 +67,8 @@ const installed = new Set<string>();
 const faces = new Map<string, Advance>();
 /** The images the compiler has, at `/images/<path>`. */
 const available = new Set<ImagePath>();
+/** Formulas mitex rejected, with its message, that the newest Markdown still has. */
+const rejected = new Map<MathCall, string>();
 /** What the compiler typesets with; null until the first settings arrive. */
 let applied: PageSettings | null = null;
 /** The newest settings asked for, which wait while their fonts download. */
@@ -86,6 +89,7 @@ interface Compiled {
   rev: Rev;
   settings: PageSettings;
   images: ImagePath[];
+  mathErrors: string[];
   convertMs: number;
   compileMs: number;
 }
@@ -148,26 +152,24 @@ async function applySettings(next: PageSettings): Promise<boolean> {
   return true;
 }
 
+const diagnosticText = ({ package: pkg, path, range, severity, message }: Diagnostic) =>
+  `${pkg ? `${pkg}@` : ''}${path}:${range.replace(/\d+/g, (n) => String(Number(n) + 1))}: ${severity}: ${message}`;
+
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const settings = applied!;
-  const t0 = performance.now();
-  const { typst, pieces, images } = convert(markdown, available);
-  const t1 = performance.now();
-  compiler.addSource(MAIN_PATH, mainSource(preludeFor(settings), typst));
   try {
-    const { result, diagnostics = [] } = await compiler.compile({
-      mainFilePath: MAIN_PATH,
-      incrementalServer: server,
-      diagnostics: 'unix',
+    const { converted, result, diagnostics = [], convertMs, compileMs } = await compileMarkdown(markdown, preludeFor(settings), available, rejected, (source) => {
+      compiler.addSource(MAIN_PATH, source);
+      return compiler.compile({ mainFilePath: MAIN_PATH, incrementalServer: server, diagnostics: 'full' });
     });
-    const t2 = performance.now();
     if (!result) {
-      post({ kind: 'failed', rev, diagnostics });
+      post({ kind: 'failed', rev, diagnostics: diagnostics.map(diagnosticText) });
       return;
     }
     raster.merge(result);
-    linker.setDocument(pieces, edgesFor(settings.theme));
-    shown = { rev, settings, images, convertMs: t1 - t0, compileMs: t2 - t1 };
+    linker.setDocument(converted.pieces, edgesFor(settings.theme));
+    const mathErrors = converted.typedMath.map((call) => rejected.get(call)!);
+    shown = { rev, settings, images: converted.images, mathErrors, convertMs, compileMs };
     await drawNext(shown, false);
   } catch (error) {
     post({ kind: 'failed', rev, diagnostics: [errorText(error)] });

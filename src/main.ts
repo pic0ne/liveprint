@@ -70,10 +70,13 @@ window.addEventListener('keydown', (e) => {
 
 const meter = new LatencyMeter();
 // Raster time and redrawn pages add up over every `pages` message of one rev.
-const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, failure: '', fileFailure: '' };
+const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, math: '', failure: '', fileFailure: '' };
 const ms = (n: number) => (Number.isNaN(n) ? '–' : n.toFixed(1));
 
-/** Timings only while toggled on; the first diagnostic of a failed compile and a failed open or save always show. */
+/**
+ * Timings only while toggled on. Why a formula shows as typed, the first diagnostic of a failed compile and a failed
+ * open or save always show.
+ */
 function drawOverlay(): void {
   const s = meter.stats();
   const stats = statsVisible
@@ -84,6 +87,7 @@ function drawOverlay(): void {
       ]
     : [];
   const lines = stats.map((text) => Object.assign(document.createElement('div'), { textContent: text }));
+  if (last.math) lines.push(Object.assign(document.createElement('div'), { textContent: last.math, className: 'notice' }));
   for (const failure of [last.failure, last.fileFailure].filter(Boolean)) {
     lines.push(Object.assign(document.createElement('div'), { textContent: failure, className: 'failure' }));
   }
@@ -413,6 +417,7 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
         rasterMs: (sameRev ? last.rasterMs : 0) + data.rasterMs,
         redrawn: (sameRev ? last.redrawn : 0) + data.bitmaps.length,
         pages: data.sizes.length,
+        math: mathNotice(data.mathErrors),
         failure: '',
       });
       afterNextPaint(() => {
@@ -440,6 +445,11 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       pages.showSpot(data.spot);
       break;
   }
+}
+
+function mathNotice(errors: string[]): string {
+  if (errors.length === 0) return '';
+  return errors.length === 1 ? `A formula shows as typed: ${errors[0]}` : `${errors.length} formulas show as typed. The first: ${errors[0]}`;
 }
 
 function message(error: unknown): string {
