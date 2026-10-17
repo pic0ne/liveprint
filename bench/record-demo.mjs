@@ -1,4 +1,5 @@
-// Records docs/demo.gif: typing with the live preview and the latency overlay, pasting an image, then two-way linking in both directions.
+// Records docs/demo.gif: typing with the live preview and the latency overlay, pasting an image, then two-way linking in
+// both directions, a click on the image included.
 // Headless Chrome screencast against `vite preview` of dist/ (`npm run record:demo` builds it), encoded with ffmpeg.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -46,6 +47,24 @@ const previewPoint = (phrase) =>
     };
     w.addEventListener('message', on);
     w.postMessage({ kind: 'runs', id: 1e9 });
+  })`);
+
+/**
+ * Viewport point at the middle of the image whose Markdown names `path`, from where the worker would mark the cursor
+ * in it. The id is below any the app sends, so the app does not show this spot.
+ */
+const imagePoint = (path) =>
+  evaluate(`new Promise((resolve) => {
+    const w = window.__worker;
+    const on = ({ data }) => {
+      if (data.kind !== 'located' || data.id !== -1) return;
+      w.removeEventListener('message', on);
+      const { page, x, y, w: width, h } = data.spot;
+      const box = document.querySelectorAll('#pages canvas')[page].getBoundingClientRect();
+      resolve({ x: box.left + (x + width / 2) * box.width, y: box.top + (y + h / 2) * box.height });
+    };
+    w.addEventListener('message', on);
+    w.postMessage({ kind: 'locate', id: -1, offset: ${view}.state.doc.toString().indexOf(${JSON.stringify(`](${path}`)}) });
   })`);
 
 const mouse = async (type, { x, y }, extra = {}) =>
@@ -106,6 +125,10 @@ await click(await previewPoint('The measure'));
 await sleep(1400);
 await key('ArrowDown', 'ArrowDown', 40, 6);
 await sleep(900);
+
+await click(await imagePoint('line-length.png'));
+await sleep(1400);
+console.log(`after the click on the image, the cursor is in ${JSON.stringify(await evaluate(`(() => { const v = ${view}; const h = v.state.selection.main.head; return v.state.doc.toString().slice(h - 2, h) + '|' + v.state.doc.toString().slice(h, h + 18); })()`))}`);
 
 await click(await previewPoint('Comfortable leading'));
 await sleep(1600);

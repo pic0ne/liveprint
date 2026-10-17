@@ -1,6 +1,6 @@
 # liveprint
 
-![Typing in liveprint: the typeset pages update on each keystroke with the latency overlay showing about 40 ms, then a click on a heading in the preview moves the editor cursor there, and the arrow keys move a highlight through the preview](docs/demo.gif)
+![Typing in liveprint: the typeset pages update on each keystroke with the latency overlay showing about 40 ms, then a click on a heading in the preview moves the editor cursor there, the arrow keys move a highlight through the preview, and a click on the pasted image puts the cursor in its Markdown and lays the highlight over the image](docs/demo.gif)
 
 Write Markdown on the left and see the real PDF pages on the right while you type. The preview is the typeset document itself, not an HTML approximation: Typst compiles it in your browser, and **Download .pdf** gives you the same pages you see.
 
@@ -54,7 +54,7 @@ Rendering the pages as one SVG put about 21,000 elements in the page. Chrome the
 
 ## Two-way linking
 
-Click a word in the preview and the editor cursor moves into that word. Move the cursor in the editor and the preview marks the same place: a pale band over the printed line and a thin bar at the character. If that line is out of sight, the preview scrolls it to a third of the way down, unless you scrolled the preview yourself in the last second.
+Click a word in the preview and the editor cursor moves into that word. Move the cursor in the editor and the preview marks the same place: a pale band over the printed line and a thin bar at the character. If that line is out of sight, the preview scrolls it to a third of the way down, unless you scrolled the preview yourself in the last second. Images link too, as [Linking an image](#linking-an-image) describes.
 
 A Markdown paragraph is usually one long source line, so linking by line would only find the paragraph. liveprint links by character. typst.ts 0.7.0 cannot map a click to the source or back, so liveprint matches the printed text against the Markdown instead:
 
@@ -152,9 +152,15 @@ When the Markdown names an image that liveprint does not have, the preview shows
 
 Remote images (`https://…`) and `data:` URLs are not loaded, and neither are paths that leave the folder, such as `../shared/x.png`. They show as a frame too.
 
-### Linking around an image
+### Linking an image
 
-An image prints no Markdown text, so linking passes over it. A click on the text before or after an image puts the cursor in that text. A click on the image itself puts the cursor at the end of the text printed before it.
+A click anywhere on an image puts the cursor inside its Markdown, just after `![`. With the cursor anywhere inside `![…](…)`, the preview lays the pale band over the whole image, with no caret, and scrolls to it like to any other line. Clicks on the text around an image, and the cursor just outside its Markdown, link as text.
+
+An image prints no text, so the text layer that linking reads has nothing for it. Instead, the converter wraps each image it shows in `linked-image`, which places three marks that take no space: the image's natural size, a mark at its top-left corner and a mark under its left edge. When linking first needs it after a compile, the worker asks Typst for the marks with `query`, on a world compiled from the same source. The image's height is the distance between the last two marks, and its width keeps the image's aspect ratio. The marks come back in document order, and the converter lists the Markdown of each image it shows in the same order, so the worker pairs them up. A click tries these boxes first, and the text index answers everything else as before.
+
+The marks hold no Markdown offsets, and the size has a context of its own. Both keep Typst from measuring an image again on every keystroke. With offsets in the marks, or the size measured where the position is asked, a compile of the sample with three images took 0.7 to 1.2 ms longer than with no marks. Now it takes 0.2 to 0.5 ms longer, over three runs of 140 compiles each in Node. With three images added to the sample, all 103 paragraphs laid out at exactly the same places with the marks and without them, in each theme.
+
+Asking for the marks is cheap. Over 30 keystrokes in the sample with three pasted images, compiling the world took 0.20 ms and the query 0.10 ms at the median. It runs after the edited pages are posted, and a document that shows no image skips it. Typing did not slow down. Over two alternating runs per side of `node bench/browser.mjs --images --runs 1`, typing in the title with the three images measured 27.5 to 28.0 ms at p50 before and 27.5 to 28.4 ms after, and on the photo's page 30.6 to 31.2 ms before and 29.8 to 30.2 ms after. `check:linking` still passes in each theme, and a click gets its offset in 8.4 to 10.0 ms at the median.
 
 ### SVG in the preview
 
@@ -181,7 +187,7 @@ To check pasting, dropping, restoring, saving, finding images in a folder and th
 npm run check:images
 ```
 
-CDP cannot answer the file and folder pickers, so the check answers them with folders of the origin private file system, like `check:files`. It also reads each preview bitmap's pixels to confirm the image is in the first one drawn after a paste.
+CDP cannot answer the file and folder pickers, so the check answers them with folders of the origin private file system, like `check:files`. It also reads each preview bitmap's pixels to confirm the image is in the first one drawn after a paste, and to find the image's box for the linking checks. Those click the centre and near each corner of a block image and an inline image, and compare the band the cursor lays over each image with its box in the pixels.
 
 ## Offline
 
@@ -230,7 +236,7 @@ Other scripts:
 - `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, `--switch` measures choosing a theme, `--images` compares typing with and without images, and `--math` types the sample's formulas one key at a time.
 - `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
 - `npm run check:files` checks opening, saving, restoring and dropping files in headless Chrome.
-- `npm run check:images` checks pasting, dropping, restoring and saving images in headless Chrome.
+- `npm run check:images` checks pasting, dropping, restoring, saving and linking images in headless Chrome.
 - `npm run bench:load` measures the time to the first page, cold and warm, in headless Chrome.
 - `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
@@ -249,7 +255,6 @@ Known limits:
 - Only Chrome has been tested. The Firefox and Safari paths for opening and saving are tested in Chrome with the API removed.
 - The real file and folder pickers and permission prompts are not tested, because CDP cannot answer them. Asking again for a folder's permission after a reload is untested too.
 - Images in subfolders, such as `figures/plot.png`, are covered by unit tests only. Without the API, **Save** downloads `figures/plot.png` as `plot.png`.
-- A click on an image in the preview puts the cursor before the image, not on its Markdown.
 - An SVG in the preview is a 2048-pixel drawing, so it can blur at high zoom. The PDF is not affected.
 - Opening a document with images can compile the previous document once more before the new one. In five measured opens, the new document's first pages took 73 to 100 ms either way.
 - Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
