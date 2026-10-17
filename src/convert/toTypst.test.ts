@@ -68,25 +68,25 @@ const FRAME = '#align(center, block(stroke: (paint: luma(185), thickness: 0.5pt,
 const available = new Set(['cat.png', 'figures/plot.svg', 'my cat.png'] as ImagePath[]);
 
 const imageCases: [string, string, string][] = [
-  ['an image alone in its paragraph is a centred block', '![A *grey* cat](cat.png)', '#align(center, image("/images/cat.png", alt: "A grey cat"))'],
+  ['an image alone in its paragraph is a centred block', '![A *grey* cat](cat.png)', '#align(center, block(breakable: false, linked-image(image("/images/cat.png", alt: "A grey cat"))))'],
   [
     'images alone in one paragraph each get a line, whatever the whitespace between them',
     '![a](cat.png) ![b](./figures/plot.svg)\n![](<my cat.png> "title")',
-    '#align(center, image("/images/cat.png", alt: "a"))\n#align(center, image("/images/figures/plot.svg", alt: "b"))\n#align(center, image("/images/my cat.png", alt: ""))',
+    '#align(center, block(breakable: false, linked-image(image("/images/cat.png", alt: "a"))))\n#align(center, block(breakable: false, linked-image(image("/images/figures/plot.svg", alt: "b"))))\n#align(center, block(breakable: false, linked-image(image("/images/my cat.png", alt: ""))))',
   ],
-  ['an image inside text is boxed inline', 'Look: ![cat](cat.png) here.', 'Look: #box(image("/images/cat.png", alt: "cat")); here.'],
-  ['an image inside a link is boxed inline', '[![cat](cat.png)](https://x.org)', '#link("https://x.org")[#box(image("/images/cat.png", alt: "cat"));];'],
-  ['a reference image resolves through its definition', '![cat][c]\n\n[c]: <cat.png>', '#align(center, image("/images/cat.png", alt: "cat"))'],
+  ['an image inside text is boxed inline', 'Look: ![cat](cat.png) here.', 'Look: #box(linked-image(image("/images/cat.png", alt: "cat"))); here.'],
+  ['an image inside a link is boxed inline', '[![cat](cat.png)](https://x.org)', '#link("https://x.org")[#box(linked-image(image("/images/cat.png", alt: "cat")));];'],
+  ['a reference image resolves through its definition', '![cat][c]\n\n[c]: <cat.png>', '#align(center, block(breakable: false, linked-image(image("/images/cat.png", alt: "cat"))))'],
   [
     'alt text is plain: markup, URLs, escapes and entities resolved, quotes escaped',
     '![a `b` [c](http://u) \\* &amp; "q"\nline](cat.png)',
-    '#align(center, image("/images/cat.png", alt: "a b c * & \\"q\\" line"))',
+    '#align(center, block(breakable: false, linked-image(image("/images/cat.png", alt: "a b c * & \\"q\\" line"))))',
   ],
   ['a missing block image is a quiet frame holding its alt text', '![Missing *one*](gone.png)', `${FRAME}[Missing #emph[one];]))`],
   ['a remote block image is a frame too, with its URL when it has no alt text', '![](https://x.org/a.png)', `${FRAME}[https:\\/\\/x.org\\/a.png]))`],
   ['a missing inline image keeps its alt text', 'See ![the plot](gone.png).', 'See the plot.'],
   ['an unresolved reference image stays text', '![nope]', 'nope'],
-  ['an image in a heading is inline', '# Logo ![l](cat.png)', '#heading(level: 1)[Logo #box(image("/images/cat.png", alt: "l"));]'],
+  ['an image in a heading is inline', '# Logo ![l](cat.png)', '#heading(level: 1)[Logo #box(linked-image(image("/images/cat.png", alt: "l")));]'],
 ];
 
 describe('convert: images', () => {
@@ -97,6 +97,10 @@ describe('convert: images', () => {
   test('every local image is listed once, in order, available or not; remote ones are not', () => {
     const markdown = '![](b.png) ![](https://x/y.png)\n\ntext ![](a.png) ![](./b.png) ![][r] ![](../out.png)\n\n[r]: figures/plot.svg';
     expect(convert(markdown, available).images).toEqual(['b.png', 'a.png', 'figures/plot.svg']);
+  });
+
+  test('lists the Markdown of each shown image in order, and no missing one', () => {
+    expect(convert('![a](cat.png) and ![](gone.png)\n\n![](figures/plot.svg)', available).shownImages).toEqual([{ from: 0, to: 13 }, { from: 33, to: 54 }]);
   });
 
   test('a shown image adds no text pieces; a frame shows its alt text or URL where they are typed', () => {

@@ -18,8 +18,16 @@ export interface Converted {
   pieces: TextPiece[];
   /** Every local image the Markdown references, in document order, each once, whether it is available or not. */
   images: ImagePath[];
+  /** The Markdown of each image shown, in document order, which is the order of their marks on the pages. */
+  shownImages: Span[];
   /** The rejected formulas the Markdown has, shown as typed, in document order. */
   typedMath: MathCall[];
+}
+
+/** A stretch of the Markdown, from offset `from` up to `to`. */
+export interface Span {
+  from: number;
+  to: number;
 }
 
 /** A link reference definition's URL, and where it starts in the Markdown. */
@@ -34,6 +42,7 @@ interface Doc {
   pieces: TextPiece[];
   available: ReadonlySet<ImagePath>;
   images: Set<ImagePath>;
+  shownImages: Span[];
   rejected: Pick<ReadonlySet<MathCall>, 'has'>;
   typedMath: MathCall[];
 }
@@ -266,11 +275,15 @@ function plain(node: SyntaxNode, doc: Doc, from: number, to: number): string {
   return out + doc.src.slice(pos, to);
 }
 
-/** The image, which shows no Markdown text: its alt text is for screen readers and the PDF's tags, not printed. */
+/**
+ * The image, marked so the preview can link it to the Markdown that names it. It shows no Markdown text: its alt text
+ * is for screen readers and the PDF's tags, not printed.
+ */
 function image(node: SyntaxNode, doc: Doc, path: ImagePath): string {
   const [open, close] = named(node, 'LinkMark');
   const alt = softBreaks(plain(node, doc, open?.to ?? node.from, close?.from ?? node.to)).trim();
-  return `image(${str(`/images/${path}`)}, alt: ${str(alt)})`;
+  doc.shownImages.push({ from: node.from, to: node.to });
+  return `linked-image(image(${str(`/images/${path}`)}, alt: ${str(alt)}))`;
 }
 
 const PLACEHOLDER = 'block(stroke: (paint: luma(185), thickness: 0.5pt, dash: "dashed"), inset: 10pt, text(fill: luma(115))';
@@ -292,7 +305,7 @@ function blockImages(node: SyntaxNode, doc: Doc): string | null {
     .map((kid, i) => {
       const target = targets[i]!;
       const path = local(target, doc);
-      return `#align(center, ${path ? image(kid, doc, path) : placeholder(kid, doc, target)})`;
+      return `#align(center, ${path ? `block(breakable: false, ${image(kid, doc, path)})` : placeholder(kid, doc, target)})`;
     })
     .join('\n');
 }
@@ -402,6 +415,7 @@ export function convert(
 ): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), rejected, typedMath: [] };
-  return { typst: `${emit(root, doc)}\n`, pieces: doc.pieces, images: [...doc.images], typedMath: doc.typedMath };
+  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [] };
+  const typst = `${emit(root, doc)}\n`;
+  return { typst, pieces: doc.pieces, images: [...doc.images], shownImages: doc.shownImages, typedMath: doc.typedMath };
 }

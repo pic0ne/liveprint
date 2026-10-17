@@ -1,7 +1,9 @@
 import type { TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import { beforeAll, describe, expect, test } from 'vitest';
-import { nodeCompiler, repoText } from '../bench/typst-node';
+import { nodeCompiler, repoFile, repoText } from '../bench/typst-node';
 import { convert, type MathCall } from '../src/convert/toTypst';
+import type { ImagePath } from '../src/images';
+import { type ImageMark, imageBoxes } from '../src/linking/imageBoxes';
 import { compileMarkdown } from '../src/typst/compileMarkdown';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
 import { preludeFor } from '../src/typst/themes';
@@ -108,5 +110,28 @@ describe('compileMarkdown shows rejected formulas as typed', () => {
     });
     expect(result).toBeUndefined();
     expect(diagnostics.map((d) => d.message)).toEqual(['panicked with: "boom"']);
+  });
+});
+
+describe('image marks', () => {
+  test('give each shown image its box, and none to a missing one', async () => {
+    compiler.mapShadow('/images/small.png', repoFile('public/icon-192.png'));
+    compiler.mapShadow('/images/wide.png', repoFile('public/icon-512.png'));
+    const available = new Set(['small.png', 'wide.png'] as ImagePath[]);
+    const markdown = 'Text ![](small.png) inline.\n\n![a](small.png)\n\n![](gone.png)\n\n![](wide.png)\n\nAfter.';
+    const { typst, shownImages } = convert(markdown, available);
+    compiler.addSource(MAIN_PATH, mainSource(prelude, typst));
+    const marks = await compiler.runWithWorld({ mainFilePath: MAIN_PATH }, async (world) => {
+      await world.compile();
+      return world.query<ImageMark[]>({ selector: '<liveprint-image>', field: 'value' });
+    });
+    const boxes = imageBoxes(marks, shownImages);
+    expect(imageBoxes(marks.slice(1), shownImages)).toEqual([]);
+    const round = (n: number) => Math.round(n * 10) / 10;
+    expect(boxes.map(({ x, y, w, h, ...rest }) => ({ ...rest, x: round(x), y: round(y), w: round(w), h: round(h) }))).toEqual([
+      { from: 5, to: 19, page: 0, x: 94.2, y: 70.9, w: 192, h: 192 },
+      { from: 29, to: 44, page: 0, x: 201.6, y: 270, w: 192, h: 192 },
+      { from: 61, to: 74, page: 1, x: 70.9, y: 70.9, w: 453.5, h: 453.5 },
+    ]);
   });
 });
