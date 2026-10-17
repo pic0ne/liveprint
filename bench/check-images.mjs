@@ -240,6 +240,19 @@ await settled();
 first = await firstFrame();
 check('and show in their own colour', first?.page.found.cyan?.count > 0 && first.page.found.magenta?.count > 0, first?.page.found);
 
+const pdf = await evaluate(`new Promise((resolve) => {
+  const on = ({ data }) => {
+    if (data.kind !== 'pdf') return;
+    __worker.removeEventListener('message', on);
+    resolve(new TextDecoder('latin1').decode(data.bytes));
+  };
+  __worker.addEventListener('message', on);
+  __worker.postMessage({ kind: 'pdf', rev: __sent });
+})`);
+const pictures = [...pdf.matchAll(/\/Subtype\s*\/Image[^]*?\/Width\s+(\d+)[^]*?\/Height\s+(\d+)|\/Width\s+(\d+)[^]*?\/Height\s+(\d+)[^]*?\/Subtype\s*\/Image/g)].map((m) => `${m[1] ?? m[3]}x${m[2] ?? m[4]}`);
+// Each canvas-made PNG has an alpha channel, which the PDF keeps as a soft mask image of the same size.
+check('the PDF holds the pasted images at their pixel size', pictures.length >= 2 && pictures.every((size) => size === '200x100'), pictures);
+
 await setText('# Vector\n\n');
 await makeImage('plot.svg', 'violet', 300, 150, 'image/svg+xml');
 await markFrames();
