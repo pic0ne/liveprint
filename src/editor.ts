@@ -59,6 +59,7 @@ export function jumpTo(view: EditorView, offset: number): void {
 
 /**
  * `onCursor` runs on every change of the cursor or the text, since either can move where the cursor renders.
+ * `onPasteFiles` gets pasted files instead of the editor, which would insert nothing or their names.
  * `load` replaces the whole document, with a new undo history. It runs neither callback, so the caller passes the
  * new text on itself.
  */
@@ -67,6 +68,7 @@ export function createEditor(
   doc: string,
   onDocChange: (doc: string) => void,
   onCursor: () => void,
+  onPasteFiles: (files: File[]) => void,
 ): { view: EditorView; load: (doc: string) => void } {
   const extensions = [
     history(),
@@ -76,8 +78,17 @@ export function createEditor(
     EditorView.lineWrapping,
     theme,
     jumpedLine,
-    // A dropped file opens as the document, which the app handles, instead of having its text inserted.
-    EditorView.domEventHandlers({ drop: (e) => (e.dataTransfer?.files.length ?? 0) > 0 }),
+    // A dropped file is the app's to open or insert, instead of having its text inserted.
+    EditorView.domEventHandlers({
+      drop: (e) => (e.dataTransfer?.files.length ?? 0) > 0,
+      paste: (e) => {
+        const files = [...(e.clipboardData?.files ?? [])];
+        if (files.length === 0) return false;
+        e.preventDefault();
+        onPasteFiles(files);
+        return true;
+      },
+    }),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) onDocChange(update.state.doc.toString());
       if (update.docChanged || update.selectionSet) onCursor();

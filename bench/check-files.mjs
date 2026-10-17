@@ -237,7 +237,7 @@ await drop(png, await box('#pages'));
 await sleep(500);
 s = await state();
 const href = await evaluate('location.href');
-check('a dropped image neither opens nor navigates away nor asks', href === url && s.name === 'dropped.md' && s.text.endsWith(' More.') && dialogs.length === 0, { href, s, dialogs });
+check('a dropped image is inserted, on the editor or the preview, and neither opens nor navigates away nor asks', href === url && s.name === 'dropped.md' && s.text.match(/!\[\]\(photo\.png\)/g)?.length === 2 && dialogs.length === 0, { href, s, dialogs });
 
 if (args.shots) await screenshots(args.shots);
 

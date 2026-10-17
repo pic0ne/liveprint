@@ -1,6 +1,8 @@
 import { type Doc, documentTitle, isEdited, pdfName, untitled } from './doc';
+import { addImages, WorkerImages } from './docImages';
 import { createEditor, jumpTo } from './editor';
 import { download, droppedFile, openFile, saveFile } from './files';
+import { IMAGE_TYPE_NAMES, IMAGE_TYPES, type ImagePath } from './images';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
@@ -91,6 +93,7 @@ drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
 const send = (message: ToWorker) => worker.postMessage(message);
+const workerImages = new WorkerImages((message, transfer) => worker.postMessage(message, transfer));
 // Before the await below, so that nothing the worker sends while the last document is read goes unheard.
 worker.onmessage = fromWorker;
 worker.onerror = (e) => {
@@ -144,6 +147,7 @@ function locateCursor(): void {
 const start: Doc = (await restoring) ?? untitled(sample);
 performance.mark('liveprint:restored');
 let file = start.file;
+let images = start.images;
 
 const { view: editor, load } = createEditor(
   $('editor'),
@@ -154,11 +158,13 @@ const { view: editor, load } = createEditor(
     inputStart = null;
   },
   locateCursor,
+  (files) => insertImages(files, null),
 );
 // Capture phase on the editor root runs before CodeMirror's own handlers apply the edit.
 editor.dom.addEventListener('keydown', (e) => (inputStart = e.timeStamp), true);
 editor.dom.addEventListener('beforeinput', (e) => (inputStart ??= e.timeStamp), true);
 editor.dom.addEventListener('keyup', () => (inputStart = null), true);
+await workerImages.show(images);
 send({ kind: 'edit', rev, markdown: start.text });
 
 const fileName = $('file-name');
@@ -210,11 +216,36 @@ function changed(markdown: string): void {
   keep();
 }
 
-function openDoc(doc: Doc): void {
+/** The worker gets the images before any edit that references them. */
+async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
+  images = next;
+  await workerImages.show(next);
+}
+
+async function openDoc(doc: Doc): Promise<void> {
+  await setImages(doc.images);
   load(doc.text);
   file = doc.file;
   $('pages').scrollTop = 0;
   changed(doc.text);
+}
+
+/** Inserts `![](path)` for each image file at `at`, or over the selection. Other files are named in the failure line. */
+function insertImages(files: File[], at: number | null): void {
+  const refused = files.filter((f) => !IMAGE_TYPES.has(f.type)).map((f) => f.name);
+  const names = (refused.length > 0 ? refused : files.map((f) => f.name)).join(', ');
+  void fileAction(`insert ${names}`, async () => {
+    const added = await addImages(files, images);
+    if (added.paths.length > 0) {
+      await setImages(added.images);
+      const text = added.paths.map((path) => `![](${path})`).join(' ');
+      const pos = at === null ? null : Math.min(at, editor.state.doc.length);
+      const { from, to } = pos === null ? editor.state.selection.main : { from: pos, to: pos };
+      editor.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, scrollIntoView: true });
+      editor.focus();
+    }
+    if (refused.length > 0) throw new Error(`liveprint shows ${IMAGE_TYPE_NAMES} images`);
+  });
 }
 
 const mayDiscard = () => !isEdited(editor.state.doc.toString(), file) || confirm(`Discard unsaved changes to ${file.name}?`);
@@ -239,7 +270,7 @@ async function fileAction(verb: string, action: () => Promise<void>): Promise<vo
 const open = () =>
   fileAction('open the file', async () => {
     const doc = await openFile();
-    if (doc && mayDiscard()) openDoc(doc);
+    if (doc && mayDiscard()) await openDoc(doc);
   });
 
 const save = (as: boolean) =>
@@ -263,7 +294,8 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// A file dropped anywhere opens. Every file drop is cancelled, so the browser never navigates away to the file.
+// A Markdown file dropped anywhere opens, with the images dropped beside it. Images dropped on their own are inserted
+// where they land in the editor, or at the cursor. Every file drop is cancelled, so the browser never navigates away.
 window.addEventListener('dragover', (e) => {
   if (!e.dataTransfer?.types.includes('Files')) return;
   e.preventDefault();
@@ -273,7 +305,12 @@ window.addEventListener('drop', (e) => {
   if (!e.dataTransfer?.types.includes('Files')) return;
   e.preventDefault();
   const dropped = droppedFile(e.dataTransfer);
-  if (dropped && mayDiscard()) void fileAction('open the dropped file', async () => openDoc(await dropped));
+  if (dropped) {
+    if (mayDiscard()) void fileAction('open the dropped file', async () => openDoc(await dropped));
+    return;
+  }
+  const onEditor = e.target instanceof Node && editor.dom.contains(e.target);
+  insertImages([...e.dataTransfer.files], onEditor ? editor.posAtCoords({ x: e.clientX, y: e.clientY }) : null);
 });
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);

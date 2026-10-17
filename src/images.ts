@@ -20,10 +20,26 @@ export function imagePath(url: string): ImagePath | null {
   return segments.join('/') as ImagePath;
 }
 
+/** The file name extensions of each image type liveprint inserts, the usual one first. */
+const EXTENSIONS: Record<string, string[]> = {
+  'image/png': ['png'],
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/gif': ['gif'],
+  'image/webp': ['webp'],
+  'image/svg+xml': ['svg'],
+};
+
 /** The types Typst and the renderer both read. Anything else is refused at insert with a message naming these. */
-export const IMAGE_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
+export const IMAGE_TYPES: ReadonlySet<string> = new Set(Object.keys(EXTENSIONS));
 
 export const IMAGE_TYPE_NAMES = 'PNG, JPEG, GIF, WebP and SVG';
+
+/** The file name, with its type's extension added when it has another or none, since Typst goes by the extension. */
+export function withExtension(name: string, type: string): string {
+  const extensions = EXTENSIONS[type];
+  const ext = /\.([^.]*)$/.exec(name)?.[1]?.toLowerCase();
+  return !extensions || (ext !== undefined && extensions.includes(ext)) ? name : `${name}.${extensions[0]}`;
+}
 
 /** A free name for an inserted image: its file name with spaces and unsafe characters made "-", then "-2", "-3"... Unicode letters stay. */
 export function freeName(name: string, taken: (path: ImagePath) => boolean): ImagePath {

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { freeName, type ImagePath, imagePath } from './images';
+import { freeName, type ImagePath, imagePath, withExtension } from './images';
 
 test.each([
   ['cat.png', 'cat.png'],
@@ -53,4 +53,16 @@ test.each([
   ['plot', ['plot'], 'plot-2'],
 ])('%j with %j taken is %j', (name, taken, path) => {
   expect(freeName(name, (p) => taken.includes(p))).toBe(path as ImagePath);
+});
+
+test.each([
+  ['image.png', 'image/png', 'image.png'],
+  ['photo.JPG', 'image/jpeg', 'photo.JPG'],
+  ['photo.jpeg', 'image/jpeg', 'photo.jpeg'],
+  ['image', 'image/png', 'image.png'],
+  ['plot.data', 'image/svg+xml', 'plot.data.svg'],
+  ['shot.png', 'image/webp', 'shot.png.webp'],
+  ['notes.bmp', 'image/bmp', 'notes.bmp'],
+])('%j of type %s is named %j', (name, type, named) => {
+  expect(withExtension(name, type)).toBe(named);
 });
