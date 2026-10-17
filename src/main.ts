@@ -12,6 +12,7 @@ import { keepDoc, keepImages, restoreDoc } from './restore';
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
 import { SettingsMenu } from './settingsMenu';
+import { THEMES } from './typst/themes';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -70,7 +71,7 @@ window.addEventListener('keydown', (e) => {
 
 const meter = new LatencyMeter();
 // Raster time and redrawn pages add up over every `pages` message of one rev.
-const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, math: '', failure: '', fileFailure: '' };
+const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, math: '', failure: '', fontFailure: '', fileFailure: '' };
 const ms = (n: number) => (Number.isNaN(n) ? '–' : n.toFixed(1));
 
 /**
@@ -88,7 +89,7 @@ function drawOverlay(): void {
     : [];
   const lines = stats.map((text) => Object.assign(document.createElement('div'), { textContent: text }));
   if (last.math) lines.push(Object.assign(document.createElement('div'), { textContent: last.math, className: 'notice' }));
-  for (const failure of [last.failure, last.fileFailure].filter(Boolean)) {
+  for (const failure of [last.failure, last.fontFailure, last.fileFailure].filter(Boolean)) {
     lines.push(Object.assign(document.createElement('div'), { textContent: failure, className: 'failure' }));
   }
   overlay.replaceChildren(...lines);
@@ -118,13 +119,23 @@ let stored: string | null = null;
 try {
   stored = localStorage.getItem(SETTINGS_KEY);
 } catch {}
-const settings = parseSettings(stored, defaultSettings(navigator.language));
-send({ kind: 'settings', settings });
-const menu = new SettingsMenu($('settings'), settings, (next) => {
-  send({ kind: 'settings', settings: next });
+/** The reader's choice, which the browser keeps, except a theme whose fonts failed: then the theme on screen. */
+let settings = parseSettings(stored, defaultSettings(navigator.language));
+function keepSettings(next: PageSettings): void {
+  settings = next;
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
   } catch {}
+}
+send({ kind: 'settings', settings });
+const menu = new SettingsMenu($('settings'), settings, (next) => {
+  // Choosing a theme, the failed one again included, answers a font failure.
+  if (next.theme !== settings.theme) {
+    last.fontFailure = '';
+    drawOverlay();
+  }
+  keepSettings(next);
+  send({ kind: 'settings', settings: next });
 });
 const pages = new Pages($('pages'), (view) => send({ kind: 'view', ...view }));
 
@@ -431,6 +442,16 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       last.failure = data.diagnostics[0] ?? 'Compile failed';
       drawOverlay();
       break;
+    case 'fontsFailed': {
+      // The reader has moved on to another theme since.
+      if (data.theme !== settings.theme) break;
+      const name = THEMES[data.theme].label;
+      last.fontFailure = `Could not download the ${name} fonts: ${data.message}. Choose ${name} again to retry.`;
+      keepSettings({ ...settings, theme: data.showing });
+      menu.select(settings);
+      drawOverlay();
+      break;
+    }
     case 'pdf':
       if (data.rev !== pdfRequest) break;
       pdfRequest = null;

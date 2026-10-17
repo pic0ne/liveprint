@@ -4,7 +4,7 @@ import type { MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
 import { type Advance, fittedEdges } from '../linking/edges';
 import { type ImageMark, imageBoxes } from '../linking/imageBoxes';
-import { type Bytes, type FromWorker, firstRev, type LinkRequest, type Rev, type ToWorker } from '../protocol';
+import { type Bytes, type FromWorker, type LinkRequest, type Rev, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
 import { compileMarkdown, type Diagnostic } from '../typst/compileMarkdown';
 import { createCompiler, MAIN_PATH } from '../typst/compiler';
@@ -125,8 +125,7 @@ async function installFonts(): Promise<void> {
 async function applySettings(next: PageSettings): Promise<boolean> {
   wanted = next;
   const theme = THEMES[next.theme];
-  const report = (error: unknown) =>
-    post({ kind: 'failed', rev: shown?.rev ?? firstRev, diagnostics: [`Could not load the ${theme.label} fonts: ${errorText(error)}`] });
+  const report = (error: unknown) => post({ kind: 'fontsFailed', theme: next.theme, showing: applied?.theme ?? 'book', message: errorText(error) });
   // Before the first compile there is nothing to keep showing, so the fallback is Book, which needs only the boot fonts.
   const fallBack = (error: unknown) => (report(error), applied ? false : applySettings({ ...next, theme: 'book' }));
   if (!fonts.has(theme.fonts)) {

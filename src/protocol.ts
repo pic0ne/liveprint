@@ -1,6 +1,6 @@
 import type { ImagePath } from './images';
 import type { PageRuns, Spot } from './linking/sourceIndex';
-import type { PageSettings } from './settings';
+import type { PageSettings, ThemeId } from './settings';
 
 /** Editor revision. Every edit the main thread sends gets the next one. */
 export type Rev = number & { readonly __brand: 'Rev' };
@@ -79,6 +79,8 @@ export type FromWorker =
       rasterMs: number;
     }
   | { kind: 'failed'; rev: Rev; diagnostics: string[] }
+  /** A theme's fonts did not download or install. The preview stays in `showing`, and choosing the theme again retries. */
+  | { kind: 'fontsFailed'; theme: ThemeId; showing: ThemeId; message: string }
   | { kind: 'pdf'; rev: Rev; bytes: Bytes }
   | { kind: 'sourced'; id: number; offset: number | null }
   | { kind: 'located'; id: number; spot: Spot | null }

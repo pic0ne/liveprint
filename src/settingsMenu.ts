@@ -65,6 +65,12 @@ export class SettingsMenu {
     });
   }
 
+  /** Shows `settings` as the choice, without calling back: the page's own correction, not the reader's. */
+  select(settings: PageSettings): void {
+    this.#settings = settings;
+    this.#render();
+  }
+
   /** The theme the preview is typeset in. A chosen theme that differs is still loading its fonts. */
   showing(theme: ThemeId): void {
     if (theme === this.#shownTheme) return;
