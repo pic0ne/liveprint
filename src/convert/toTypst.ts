@@ -3,6 +3,9 @@ import { markdownParser } from '../markdown/parser';
 
 type SyntaxNode = ReturnType<typeof markdownParser.parse>['topNode'];
 
+/** A formula's Typst call, `mi("…")` or `mitex("…")`, exactly as the converter writes it. */
+export type MathCall = string & { readonly __brand: 'MathCall' };
+
 /** `text[i]` renders the Markdown character at offset `from + i`. */
 export interface TextPiece {
   from: number;
@@ -15,6 +18,8 @@ export interface Converted {
   pieces: TextPiece[];
   /** Every local image the Markdown references, in document order, each once, whether it is available or not. */
   images: ImagePath[];
+  /** The rejected formulas the Markdown has, shown as typed, in document order. */
+  typedMath: MathCall[];
 }
 
 /** A link reference definition's URL, and where it starts in the Markdown. */
@@ -29,6 +34,8 @@ interface Doc {
   pieces: TextPiece[];
   available: ReadonlySet<ImagePath>;
   images: Set<ImagePath>;
+  rejected: Pick<ReadonlySet<MathCall>, 'has'>;
+  typedMath: MathCall[];
 }
 
 type Emit = (node: SyntaxNode, doc: Doc) => string;
@@ -211,6 +218,19 @@ const paragraphFallback: Emit = (node, doc) => textBlock(doc, node.from, node.to
 
 const drop: Emit = () => '';
 
+/** A formula, or its LaTeX between its marks in a quiet monospace face when it was rejected or is not closed. */
+const math: Emit = (node, doc) => {
+  const block = node.name === 'BlockMath';
+  const marks = named(node, 'MathMark').map((mark) => slice(mark, doc));
+  const tex = joinChildren(node, doc, 'MathText');
+  const call = `${marks[0] === '$$' ? 'mitex' : 'mi'}(${str(block ? tex.trim() : tex)})` as MathCall;
+  const closed = marks.length === 2;
+  if (closed && !doc.rejected.has(call)) return `#${call}`;
+  if (closed) doc.typedMath.push(call);
+  const typed = `${marks[0]}${shownChildren(node, doc, 'MathText')}${marks[1] ?? ''}`;
+  return `#typed-math(raw(${str(block ? typed : typed.replace(/\n/g, ' '))}${block ? ', block: true' : ''}))`;
+};
+
 /** An image's URL as written, or as its reference defines it. Undefined for a reference with no definition. */
 function imageTarget(node: SyntaxNode, doc: Doc): Ref | undefined {
   const url = node.getChild('URL');
@@ -304,11 +324,7 @@ const EMITTERS: Record<string, Emit> = {
   CodeBlock: (node, doc) => `#raw(${str(shownChildren(node, doc, 'CodeText').replace(/\n+$/, ''))}, block: true)`,
   HorizontalRule: () => '#line(length: 100%)',
   Table: table,
-  BlockMath: (node, doc) => {
-    const tex = joinChildren(node, doc, 'MathText');
-    const closed = named(node, 'MathMark').length === 2;
-    return closed ? `#mitex(${str(tex.trim())})` : `#raw(${str(`$$${shownChildren(node, doc, 'MathText')}`)}, block: true)`;
-  },
+  BlockMath: math,
   HTMLBlock: paragraphFallback,
   LinkReference: drop,
   CommentBlock: (node, doc) => textBlock(doc, node.from + (/^[^]*-->/.exec(slice(node, doc))?.[0].length ?? 0), node.to),
@@ -324,10 +340,7 @@ const EMITTERS: Record<string, Emit> = {
     if (/^ .*[^ ].* $/.test(doc.src.slice(from, to).replace(/\n/g, ' '))) [from, to] = [from + 1, to - 1];
     return `#raw(${str(verbatim(doc, from, to).replace(/\n/g, ' '))});`;
   },
-  InlineMath: (node, doc) => {
-    const display = (node.getChild('MathMark')?.to ?? 0) - node.from === 2;
-    return `#${display ? 'mitex' : 'mi'}(${str(joinChildren(node, doc, 'MathText'))});`;
-  },
+  InlineMath: (node, doc) => `${math(node, doc)};`,
   Link: (node, doc) => {
     const url = node.getChild('URL');
     if (url) return link(slice(url, doc), inlineBetweenMarks(node, doc));
@@ -378,12 +391,17 @@ function collectRefs(root: SyntaxNode, src: string): Map<string, Ref> {
 
 /**
  * Markdown to the Typst document body, the Markdown text it shows, and the local images it references. Images in
- * `available` are typeset from `/images/<path>`. Pure and total: every input yields Typst that parses. Piece offsets
- * count in the text after `\r\n` became `\n`; the editor's text never has `\r`.
+ * `available` are typeset from `/images/<path>`, and formulas whose call is in `rejected` show as typed. Pure and
+ * total: every input yields Typst that parses. Piece offsets count in the text after `\r\n` became `\n`; the editor's
+ * text never has `\r`.
  */
-export function convert(markdown: string, available: ReadonlySet<ImagePath> = new Set()): Converted {
+export function convert(
+  markdown: string,
+  available: ReadonlySet<ImagePath> = new Set(),
+  rejected: Pick<ReadonlySet<MathCall>, 'has'> = new Set(),
+): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set() };
-  return { typst: `${emit(root, doc)}\n`, pieces: doc.pieces, images: [...doc.images] };
+  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), rejected, typedMath: [] };
+  return { typst: `${emit(root, doc)}\n`, pieces: doc.pieces, images: [...doc.images], typedMath: doc.typedMath };
 }

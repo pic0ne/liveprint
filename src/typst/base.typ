@@ -3,6 +3,9 @@
 #set document(title: none)
 #show math.equation: set text(font: "New Computer Modern Math")
 
+// A formula mitex rejected, or one not closed yet, as typed.
+#let typed-math(code) = text(fill: luma(115), code)
+
 #let task(done, body) = {
   box(
     width: 0.72em,

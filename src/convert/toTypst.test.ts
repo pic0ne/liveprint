@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import sample from '../sample.md?raw';
 import type { ImagePath } from '../images';
-import { convert, type TextPiece } from './toTypst';
+import { convert, type MathCall, type TextPiece } from './toTypst';
 
 const cases: [string, string, string][] = [
   ['ATX and setext headings', '# Title #\n\nSetext\n---', '#heading(level: 1)[Title]\n\n#heading(level: 2)[Setext]'],
@@ -35,7 +35,7 @@ const cases: [string, string, string][] = [
   ['indented code', '    indented\n    code\n', '#raw("indented\\ncode", block: true)'],
   ['inline and inline-display math', 'inline $x^2$ and $$\\sum_i i$$ end', 'inline #mi("x^2"); and #mitex("\\\\sum_i i"); end'],
   ['block math over lines', '$$\na \\\\\nb\n$$', '#mitex("a \\\\\\\\\\nb")'],
-  ['unclosed block math shows as code', '$$\nunclosed', '#raw("$$\\nunclosed", block: true)'],
+  ['unclosed block math shows as typed', '$$\nunclosed', '#typed-math(raw("$$\\nunclosed", block: true))'],
   [
     'table alignment, empty cells, ragged rows',
     '| a | b | c |\n|:--|:-:|--:|\n| 1 |  | 3 | 4 |\n| only |',
@@ -105,6 +105,31 @@ describe('convert: images', () => {
     expect(convert('![lost](x.png)', available).pieces).toEqual([{ from: 2, text: 'lost' }]);
     expect(convert('![](http://u/x.png)', available).pieces).toEqual([{ from: 4, text: 'http://u/x.png' }]);
     expect(convert('![][r]\n\n[r]: <gone.png>', available).pieces).toEqual([{ from: 14, text: 'gone.png' }]);
+  });
+});
+
+describe('convert: rejected formulas', () => {
+  const rejected = new Set(['mi("\\\\frac{1")', 'mitex("\\\\foo")'] as MathCall[]);
+
+  test('show as typed, with their marks, and are listed in order; other formulas still typeset', () => {
+    const markdown = 'a $\\frac{1$ b $x$ c $$\\foo$$\n\n$$\n\\foo\n$$\n\nd $\\frac{1$';
+    const { typst, typedMath } = convert(markdown, new Set(), rejected);
+    expect(typst).toBe(
+      [
+        'a #typed-math(raw("$\\\\frac{1$")); b #mi("x"); c #typed-math(raw("$$\\\\foo$$"));',
+        '#typed-math(raw("$$\\n\\\\foo\\n$$", block: true))',
+        'd #typed-math(raw("$\\\\frac{1$"));\n',
+      ].join('\n\n'),
+    );
+    expect(typedMath).toEqual(['mi("\\\\frac{1")', 'mitex("\\\\foo")', 'mitex("\\\\foo")', 'mi("\\\\frac{1")']);
+  });
+
+  test('link through their LaTeX', () => {
+    expect(convert('a $\\frac{1$ b', new Set(), rejected).pieces).toEqual([{ from: 0, text: 'a ' }, { from: 3, text: '\\frac{1' }, { from: 11, text: ' b' }]);
+  });
+
+  test('a call counts only for its own kind of formula', () => {
+    expect(convert('$\\foo$', new Set(), rejected)).toMatchObject({ typst: '#mi("\\\\foo");\n', typedMath: [] });
   });
 });
 
