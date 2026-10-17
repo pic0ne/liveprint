@@ -40,12 +40,16 @@ const blankVisible = `(() => {
   return [...pages.querySelectorAll('canvas')].filter((c) => !c.hasAttribute('width') && c.offsetTop < bottom && c.offsetTop + c.offsetHeight > top).length;
 })()`;
 
-// Leaving the typed page for the next spot passes its beforeunload warning.
+// Each spot starts from the sample: leaving the typed page passes its beforeunload warning, and the document it
+// kept for restoring is cleared once it is gone.
 page.listeners.add(({ method }) => {
   if (method === 'Page.javascriptDialogOpening') page.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => {});
 });
 
 async function load(spot) {
+  await page.send('Page.navigate', { url: 'about:blank' });
+  await until('typed page left', () => evaluate(`location.href === 'about:blank'`));
+  await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
   await page.send('Page.navigate', { url });
   await until('pages drawn', () => evaluate(`document.querySelectorAll('#pages canvas[width]').length > 1`));
   await sleep(1000);

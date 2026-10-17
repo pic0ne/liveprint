@@ -5,6 +5,7 @@ import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
+import { keepDoc, restoreDoc } from './restore';
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
 import { SettingsMenu } from './settingsMenu';
@@ -90,6 +91,19 @@ drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
 const send = (message: ToWorker) => worker.postMessage(message);
+// Before the await below, so that nothing the worker sends while the last document is read goes unheard.
+worker.onmessage = fromWorker;
+worker.onerror = (e) => {
+  last.failure = `Compiler failed to start: ${e.message}`;
+  drawOverlay();
+};
+
+// Read while the compiler boots, so that restoring the last document does not hold up the first compile.
+const restoring = restoreDoc().catch((error) => {
+  last.fileFailure = `Could not restore the last document: ${message(error)}`;
+  drawOverlay();
+  return null;
+});
 
 const SETTINGS_KEY = 'liveprint.page';
 let stored: string | null = null;
@@ -127,7 +141,8 @@ function locateCursor(): void {
   });
 }
 
-const start: Doc = untitled(sample);
+const start: Doc = (await restoring) ?? untitled(sample);
+performance.mark('liveprint:restored');
 let file = start.file;
 
 const { view: editor, load } = createEditor(
@@ -161,14 +176,31 @@ function showFile(text = editor.state.doc.toString()): void {
 }
 showFile();
 
+// Kept at most every 300 ms while typing, rather than after a pause, so a crash mid-sentence loses little.
+let keepTimer = 0;
+function keepNow(): void {
+  clearTimeout(keepTimer);
+  keepTimer = 0;
+  keepDoc({ text: editor.state.doc.toString(), file }).catch((error) => {
+    last.fileFailure = `Could not keep a copy of ${file.name} in this browser: ${message(error)}`;
+    drawOverlay();
+  });
+}
+const keepSoon = () => (keepTimer ||= window.setTimeout(keepNow, 300));
+// beforeunload comes first, while the next page is still loading; a write that starts at pagehide can be dropped.
 window.addEventListener('beforeunload', (e) => {
+  if (keepTimer) keepNow();
   if (isEdited(editor.state.doc.toString(), file)) e.preventDefault();
+});
+window.addEventListener('pagehide', () => {
+  if (keepTimer) keepNow();
 });
 
 function changed(markdown: string): void {
   rev = nextRev(rev);
   send({ kind: 'edit', rev, markdown });
   showFile(markdown);
+  keepSoon();
 }
 
 function openDoc(doc: Doc): void {
@@ -209,6 +241,7 @@ const save = (as: boolean) =>
     if (!saved) return;
     file = saved;
     showFile();
+    keepSoon();
   });
 
 window.addEventListener('keydown', (e) => {
@@ -241,7 +274,7 @@ $('download-pdf').addEventListener('click', () => {
   send({ kind: 'pdf', rev });
 });
 
-worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
+function fromWorker({ data }: MessageEvent<FromWorker>): void {
   switch (data.kind) {
     case 'ready':
       last.bootMs = data.bootMs;
@@ -290,11 +323,7 @@ worker.onmessage = ({ data }: MessageEvent<FromWorker>) => {
       pages.showSpot(data.spot);
       break;
   }
-};
-worker.onerror = (e) => {
-  last.failure = `Compiler failed to start: ${e.message}`;
-  drawOverlay();
-};
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
