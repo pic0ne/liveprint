@@ -7,7 +7,7 @@ import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
-import { keepDoc, restoreDoc } from './restore';
+import { keepDoc, keepImages, restoreDoc } from './restore';
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
 import { SettingsMenu } from './settingsMenu';
@@ -219,6 +219,10 @@ function changed(markdown: string): void {
 /** The worker gets the images before any edit that references them. */
 async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   images = next;
+  keepImages(next).catch((error) => {
+    last.fileFailure = `Could not keep the images of ${file.name} in this browser: ${message(error)}`;
+    drawOverlay();
+  });
   await workerImages.show(next);
 }
 

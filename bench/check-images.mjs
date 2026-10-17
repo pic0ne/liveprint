@@ -209,6 +209,37 @@ await until('refusal shown', async () => (await state()).failure !== '');
 s = await state();
 check('a BMP is refused in the failure line, naming it and the types that work, and the text is unchanged', s.text === before && s.failure === 'Could not insert scan.bmp: liveprint shows PNG, JPEG, GIF, WebP and SVG images', s);
 
+console.log('\nRestoring');
+await setText('# Kept\n\n![](image.png)\n');
+await sleep(500);
+await page.send('Network.enable');
+const requested = [];
+const onRequest = ({ method, params }) => method === 'Network.requestWillBeSent' && requested.push(params.request.url);
+page.listeners.add(onRequest);
+await load(() => page.send('Page.reload'));
+page.listeners.delete(onRequest);
+s = await state();
+first = await firstFrame();
+check('a reload restores the text and the image, shown in the first bitmap', s.text === '# Kept\n\n![](image.png)\n' && centredAt(first?.page, 'magenta', 200), { s, found: first?.page.found });
+check('with no request for it', requested.length > 0 && !requested.some((u) => u.includes('image')), requested.filter((u) => u.includes('image')));
+
+await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
+await until('a page of the origin without the app', () => evaluate(`location.pathname === '/manifest.webmanifest'`));
+await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
+await evaluate(`new Promise((resolve, reject) => {
+  const request = indexedDB.open('liveprint', 1);
+  request.onupgradeneeded = () => request.result.createObjectStore('doc');
+  request.onsuccess = () => {
+    const t = request.result.transaction('doc', 'readwrite');
+    t.objectStore('doc').put(${J({ text: '# Before images\n', file: { name: 'old.md', handle: null, saved: '# Before images\n' } })}, 'last');
+    t.oncomplete = () => (request.result.close(), resolve());
+    t.onerror = () => reject(t.error);
+  };
+})`);
+await load();
+s = await state();
+check('a version 1 record, from before images, restores', s.text === '# Before images\n' && s.name === 'old.md' && !s.edited && s.failure === '', s);
+
 await close();
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exit(failures ? 1 : 0);
