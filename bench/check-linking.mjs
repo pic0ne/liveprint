@@ -2,7 +2,8 @@
 // For words sampled from every page of src/sample.md: (a) clicking the word in the preview puts the editor cursor
 // inside it; (b) a cursor inside the word puts the preview's caret mark inside the word as printed. A word's box is
 // found in the page's pixels, as the ink between the gaps that separate its run's words, so neither the source
-// index nor its character measuring decides what counts as correct.
+// index nor its character measuring decides what counts as correct. A formula mitex rejects is added to the first
+// paragraph, and a word of its LaTeX, shown as typed, is sampled too.
 // node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
 import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
@@ -43,6 +44,13 @@ await evaluate(`__worker.postMessage(${JSON.stringify({ kind: 'settings', settin
 await until(`every page drawn in ${args.theme}`, () =>
   evaluate(`__shown?.final && ${JSON.stringify(Object.entries(settings))}.every(([key, value]) => __shown[key] === value)`),
 );
+const view = `document.querySelector('.cm-content').cmTile.view`;
+const TYPED = '$\\foo zeugma$';
+await evaluate(`(() => {
+  __shown = null;
+  ${view}.dispatch({ changes: { from: ${view}.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.`)} } });
+})()`);
+await until('the typed formula drawn', () => evaluate('__shown?.final'));
 await sleep(1000);
 
 const ask = (message, reply) =>
@@ -56,7 +64,6 @@ const ask = (message, reply) =>
     __worker.addEventListener('message', on);
     __worker.postMessage(${JSON.stringify(message)});
   })`);
-const view = `document.querySelector('.cm-content').cmTile.view`;
 const markdown = await evaluate(`${view}.state.doc.toString()`);
 const { data: { pages } } = await ask({ kind: 'runs', id: 1e9 }, 'runs');
 
@@ -110,7 +117,9 @@ const occurrences = (text, word) => [...text.matchAll(new RegExp(`(?<![\\p{L}\\p
 const fences = [...markdown.matchAll(/^```[^\n]*\n[^]*?^```/gm)].map((m) => [m.index, m.index + m[0].length]);
 // Linking inside math is approximate by design, so a word printed from LaTeX, such as \exp, is not sampled.
 const maths = [...markdown.matchAll(/\$\$[^]*?\$\$|\$[^$\n]+\$/g)].map((m) => [m.index, m.index + m[0].length]);
+const typed = [markdown.indexOf(TYPED), markdown.indexOf(TYPED) + TYPED.length];
 function kindAt(offset) {
+  if (offset > typed[0] && offset < typed[1]) return 'typed math';
   const lineStart = markdown.lastIndexOf('\n', offset - 1) + 1;
   const line = markdown.slice(lineStart, markdown.indexOf('\n', offset) >>> 0);
   if (fences.some(([a, b]) => offset > a && offset < b)) return 'code';
@@ -130,8 +139,9 @@ pages.forEach(({ height, runs }, p) =>
       if (text.length < 3 || !isWord.test(text) || /[^\p{L}\p{N}]/u.test(text)) continue;
       const inMarkdown = occurrences(markdown, text);
       if (inMarkdown.length !== 1 || occurrences(allText, text).length !== 1) continue;
-      if (maths.some(([from, to]) => inMarkdown[0] > from && inMarkdown[0] < to)) continue;
-      candidates.push({ text, page: p, run, box: word.box, scale: ink[p][r].scale, from: inMarkdown[0], kind: kindAt(inMarkdown[0]), y: run.y / height });
+      const kind = kindAt(inMarkdown[0]);
+      if (kind !== 'typed math' && maths.some(([from, to]) => inMarkdown[0] > from && inMarkdown[0] < to)) continue;
+      candidates.push({ text, page: p, run, box: word.box, scale: ink[p][r].scale, from: inMarkdown[0], kind, y: run.y / height });
     }
   }),
 );
@@ -148,7 +158,8 @@ for (const m of markdown.matchAll(/\$[^$\n]+\$[\s,.;:]*([\p{L}\p{N}]+)((?:\s+[\p
 }
 
 const picked = new Set();
-for (const kind of ['table cell', 'code', 'list item', 'after math']) {
+const KINDS = ['table cell', 'code', 'list item', 'after math', 'typed math'];
+for (const kind of KINDS) {
   const found = candidates.find((c) => c.kind === kind);
   if (found) picked.add(found);
 }
@@ -237,6 +248,6 @@ console.log(`\n${results.length} words on ${new Set(results.map((r) => r.page)).
 console.log(`click to source offset: median ${sorted[sorted.length >> 1].toFixed(1)} ms, max ${sorted[sorted.length - 1].toFixed(1)} ms`);
 console.log(`edit then locate: visible pages after ${timing.drawn.toFixed(1)} ms, located after ${timing.located.toFixed(1)} ms`);
 const kinds = new Set(results.map((r) => r.kind));
-const missing = ['table cell', 'code', 'list item', 'after math'].filter((k) => !kinds.has(k));
+const missing = KINDS.filter((k) => !kinds.has(k));
 if (missing.length > 0) console.log(`no unambiguous word found of kind: ${missing.join(', ')}`);
 process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 ? 1 : 0);
