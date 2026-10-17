@@ -3,6 +3,7 @@ import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import type { MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
 import { type Advance, fittedEdges } from '../linking/edges';
+import { type ImageMark, imageBoxes } from '../linking/imageBoxes';
 import { type Bytes, type FromWorker, firstRev, type LinkRequest, type Rev, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
 import { compileMarkdown, type Diagnostic } from '../typst/compileMarkdown';
@@ -11,7 +12,7 @@ import { FONT_FILES, PACKAGE_FILES } from '../typst/files';
 import { preludeFor, THEMES } from '../typst/themes';
 import { measureFaces } from './advances';
 import { FontFiles } from './fonts';
-import { Linker } from './linker';
+import { Linker, sourceAt, spotOf } from './linker';
 import { type Edit, type ImageUpdate, Mailbox } from './mailbox';
 import { drawSvgFrom, PageRaster } from './raster';
 
@@ -167,7 +168,8 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
       return;
     }
     raster.merge(result);
-    linker.setDocument(converted.pieces, edgesFor(settings.theme));
+    const { shownImages } = converted;
+    linker.setDocument(converted.pieces, edgesFor(settings.theme), async () => (shownImages.length > 0 ? imageBoxes(await queryMarks(), shownImages) : []));
     const mathErrors = converted.typedMath.map((call) => rejected.get(call)!);
     shown = { rev, settings, images: converted.images, mathErrors, convertMs, compileMs };
     await drawNext(shown, false);
@@ -175,6 +177,17 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
     post({ kind: 'failed', rev, diagnostics: [errorText(error)] });
   }
 }
+
+/**
+ * The `linked-image` marks of the newest compile, which say where its images print. Asked when linking first needs
+ * them after a compile, which is after the edited pages are posted, and a world compiled from the same source reuses
+ * the compile's work. If a newer compile failed, the world does not compile, and the images are left out.
+ */
+const queryMarks = () =>
+  compiler.runWithWorld({ mainFilePath: MAIN_PATH }, async (world) => {
+    await world.compile();
+    return world.query<ImageMark[]>({ selector: '<liveprint-image>', field: 'value' });
+  });
 
 async function compilePdf(rev: Rev): Promise<void> {
   try {
@@ -207,10 +220,10 @@ async function answerLink(request: LinkRequest): Promise<void> {
   const linked = shown ? await linker.linked().catch(() => null) : null;
   switch (request.kind) {
     case 'source':
-      post({ kind: 'sourced', id: request.id, offset: linked?.index.sourceAt(request.page, request.fx, request.fy) ?? null });
+      post({ kind: 'sourced', id: request.id, offset: linked ? sourceAt(linked, request.page, request.fx, request.fy) : null });
       break;
     case 'locate':
-      post({ kind: 'located', id: request.id, spot: linked?.index.spotOf(request.offset) ?? null });
+      post({ kind: 'located', id: request.id, spot: linked ? spotOf(linked, request.offset) : null });
       break;
     case 'runs':
       post({ kind: 'runs', id: request.id, pages: linked?.pages ?? [] });

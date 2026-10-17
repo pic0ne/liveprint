@@ -10,15 +10,13 @@ export interface PageRuns {
   runs: Run[];
 }
 
-/** Where a Markdown offset renders, in fractions of the page's width and height. `x` is the caret, the rest its line. */
-export interface Spot {
-  page: number;
-  x: number;
-  y: number;
-  h: number;
-  lineLeft: number;
-  lineRight: number;
-}
+/**
+ * Where a Markdown offset renders, in fractions of the page's width and height: a caret at `x` on a line of text, or
+ * the whole box of the image whose Markdown holds the offset.
+ */
+export type Spot =
+  | { kind: 'text'; page: number; x: number; y: number; h: number; lineLeft: number; lineRight: number }
+  | { kind: 'image'; page: number; x: number; y: number; w: number; h: number };
 
 interface Line {
   page: number;
@@ -196,6 +194,7 @@ export class SourceIndex {
     const { line, edges, first } = this.#placed[char]!;
     const { width, height } = this.#pages[line.page]!;
     return {
+      kind: 'text',
       page: line.page,
       x: edges[char - first + (after ? 1 : 0)]! / width,
       y: line.body.y / height,

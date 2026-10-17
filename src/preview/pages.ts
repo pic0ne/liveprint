@@ -76,9 +76,14 @@ export class Pages {
       width: `${canvas.offsetWidth}px`,
       height: `${canvas.offsetHeight}px`,
     });
-    const [line, caret] = this.#mark.children as unknown as [HTMLElement, HTMLElement];
+    const [band, caret] = this.#mark.children as unknown as [HTMLElement, HTMLElement];
+    caret.hidden = spot.kind === 'image';
+    if (spot.kind === 'image') {
+      Object.assign(band.style, { left: percent(spot.x), width: percent(spot.w), top: percent(spot.y), height: percent(spot.h) });
+      return;
+    }
     const vertical = { top: percent(spot.y - spot.h * BAND_BLEED), height: percent(spot.h * (1 + 2 * BAND_BLEED)) };
-    Object.assign(line.style, { left: percent(spot.lineLeft), width: percent(spot.lineRight - spot.lineLeft), ...vertical });
+    Object.assign(band.style, { left: percent(spot.lineLeft), width: percent(spot.lineRight - spot.lineLeft), ...vertical });
     Object.assign(caret.style, { left: percent(spot.x), ...vertical });
   }
 

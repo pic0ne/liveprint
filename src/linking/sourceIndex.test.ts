@@ -6,7 +6,7 @@ import { SourceIndex } from './sourceIndex';
 // Pages are 100 pt square and runs 5 pt per character, so fractions read as pt / 100.
 const run = (text: string, x: number, y: number): Run => ({ text, x, y, w: 5 * [...text].length, h: 10 });
 const index = (runs: Run[], pieces: { from: number; text: string }[]) => SourceIndex.build([{ width: 100, height: 100, runs }], pieces);
-const spot = (page: number, x: number, y: number, h: number, lineLeft: number, lineRight: number) => ({ page, x, y, h, lineLeft, lineRight });
+const spot = (page: number, x: number, y: number, h: number, lineLeft: number, lineRight: number) => ({ kind: 'text', page, x, y, h, lineLeft, lineRight });
 
 describe('SourceIndex', () => {
   test('a plain line', () => {
