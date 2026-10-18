@@ -2,6 +2,7 @@
 #set text(font: "New Computer Modern", size: 11pt, lang: "en")
 #set par(justify: true, leading: 0.55em, spacing: 0.55em, first-line-indent: 1.5em)
 #set page(numbering: "1", number-align: center)
+#set page(header: context if here().page() > 1 { align(center, text(size: 0.9em, smallcaps(running-head("[month repr:long] [day padding:none], [year]")))) })
 
 #set heading(numbering: (..n) => numbering("1.1", ..n.pos().slice(1)))
 #show heading.where(level: 1): set heading(numbering: none)
@@ -27,5 +28,5 @@
   set par(first-line-indent: 0em, justify: false)
   if title != none { block(above: 0.4em, below: 1.5em, text(size: 1.75em, title)) }
   if authors.len() > 0 { block(below: 0.9em, text(size: 1.2em, authors.join(h(2.5em)))) }
-  if date != none { text(size: 1.2em, if type(date) == datetime { date.display("[month repr:long] [day padding:none], [year]") } else { date }) }
+  if date != none { text(size: 1.2em, date-text(date, "[month repr:long] [day padding:none], [year]")) }
 }))

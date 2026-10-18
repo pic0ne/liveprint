@@ -2,7 +2,13 @@
 #let accent = rgb("#0b5cad")
 #set text(font: "IBM Plex Sans", size: 10.5pt, lang: "en", hyphenate: false)
 #set par(justify: false, leading: 0.78em, spacing: 1.15em)
-#set page(footer: context align(right, text(size: 0.85em, fill: luma(110), [#counter(page).display() / #counter(page).final().first()])))
+#set page(
+  header: context if here().page() > 1 {
+    let parts = (liveprint.title, date-text(liveprint.date, "[day padding:none] [month repr:long] [year]")).filter((part) => part != none)
+    if parts.len() > 0 { text(size: 0.85em, fill: luma(110), grid(columns: (1fr, auto), ..parts)) }
+  },
+  footer: context align(right, text(size: 0.85em, fill: luma(110), [#counter(page).display() / #counter(page).final().first()])),
+)
 
 #show heading: set text(font: ("IBM Plex Sans SmBld", "IBM Plex Sans"), weight: "semibold")
 #show heading: set block(above: 1.9em, below: 0.85em)
@@ -27,7 +33,6 @@
 
 #let title-block(title: none, authors: (), date: none) = block(width: 100%, below: 2.4em, {
   if title != none { block(below: 0.7em, par(leading: 0.3em, text(font: ("IBM Plex Sans SmBld", "IBM Plex Sans"), weight: "semibold", size: 2.3em, title))) }
-  let date = if type(date) == datetime { date.display("[day padding:none] [month repr:long] [year]") } else { date }
-  let line = (authors.join(", "), date).filter((part) => part != none)
+  let line = (authors.join(", "), date-text(date, "[day padding:none] [month repr:long] [year]")).filter((part) => part != none)
   if line.len() > 0 { text(fill: luma(95), line.join([ · ])) }
 })

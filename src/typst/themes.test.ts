@@ -2,10 +2,11 @@ import { expect, test } from 'vitest';
 import { FONT_FILES } from './files';
 import { preludeFor, THEMES } from './themes';
 
-test('preludeFor sets the page after the shared preamble and before the theme', () => {
+test('preludeFor sets the variables, then the shared preamble, the page and the theme', () => {
   const lines = preludeFor({ paper: 'us-letter', margins: 'wide', theme: 'modern' }).split('\n');
   const page = lines.indexOf('#set page(paper: "us-letter", margin: 35mm)');
-  expect(lines[0]).toBe('#import "@preview/mitex:0.2.6": mitex, mi');
+  expect(lines[0]).toMatch(/^#let liveprint = \(/);
+  expect(lines[1]).toBe('#import "@preview/mitex:0.2.6": mitex, mi');
   expect(page).toBeGreaterThan(0);
   expect(lines[page + 1]).toBe('// Modern: IBM Plex Sans, ragged right, open spacing, tinted code and table header.');
 });

@@ -86,8 +86,7 @@ export const THEMES: Record<ThemeId, Theme> = {
 
 /**
  * The `liveprint` dictionary every theme can read: the page settings, and the front matter as plain text. A date the
- * front matter writes as a calendar date is a `datetime`, any other a string. The PDF takes the title, the authors and
- * a calendar date; a date it cannot read leaves the PDF without one, rather than with one the page does not print.
+ * front matter writes as a calendar date is a `datetime`, any other a string.
  */
 function variables({ paper, margins }: PageSettings, front: FrontMatter | null): string {
   const date = front?.date ?? null;
@@ -98,15 +97,17 @@ function variables({ paper, margins }: PageSettings, front: FrontMatter | null):
     `authors: (${(front?.authors ?? []).map((a) => `${str(a)},`).join(' ')})`,
     `date: ${date === null ? 'none' : typeof date === 'string' ? str(date) : datetime(date)}`,
   ];
-  const lines = [`#let liveprint = (${fields.join(', ')})`];
-  if (front) {
-    const pdfDate = date === null ? [] : [`date: ${typeof date === 'string' ? 'none' : 'liveprint.date'}`];
-    lines.push(`#set document(${['title: liveprint.title', 'author: liveprint.authors', ...pdfDate].join(', ')})`);
-  }
-  return lines.join('\n');
+  return `#let liveprint = (${fields.join(', ')})`;
+}
+
+/** The PDF takes the title, the authors and a calendar date; any other date leaves it without one, rather than with one the page does not print. */
+function metadata(front: FrontMatter | null): string {
+  if (!front) return '';
+  const date = front.date === null ? [] : [`date: ${typeof front.date === 'string' ? 'none' : 'liveprint.date'}`];
+  return `#set document(${['title: liveprint.title', 'author: liveprint.authors', ...date].join(', ')})\n`;
 }
 
 export function preludeFor(settings: PageSettings, front: FrontMatter | null = null): string {
   const { paper, margins, theme } = settings;
-  return `${base}\n${variables(settings, front)}\n#set page(paper: "${paper}", margin: ${MARGIN_MM[margins]}mm)\n${THEMES[theme].source}`;
+  return `${variables(settings, front)}\n${base}\n${metadata(front)}#set page(paper: "${paper}", margin: ${MARGIN_MM[margins]}mm)\n${THEMES[theme].source}`;
 }

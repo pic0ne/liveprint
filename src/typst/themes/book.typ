@@ -1,10 +1,13 @@
 // Book: Libertinus Serif, justified, indented paragraphs, old-style figures, quiet rules.
 #set text(font: "Libertinus Serif", size: 11.5pt, lang: "en", number-type: "old-style")
 #set par(justify: true, leading: 0.62em, spacing: 0.62em, first-line-indent: 1.2em)
-#set page(footer: context {
-  let n = counter(page).get().first()
-  if n > 1 { align(center, text(size: 0.9em, str(n))) }
-})
+#set page(
+  header: context if here().page() > 1 { align(center, text(size: 0.9em, style: "italic", running-head("[day padding:none] [month repr:long] [year]"))) },
+  footer: context {
+    let n = counter(page).get().first()
+    if n > 1 { align(center, text(size: 0.9em, str(n))) }
+  },
+)
 
 #show heading: set text(weight: "regular")
 #show heading: set block(above: 1.6em, below: 0.8em)
@@ -32,5 +35,5 @@
   set par(first-line-indent: 0em, justify: false)
   if title != none { block(below: 1em, text(size: 2.3em, title)) }
   if authors.len() > 0 { block(below: 0.6em, text(size: 1.15em, authors.join(", ", last: " and "))) }
-  if date != none { emph(if type(date) == datetime { date.display("[day padding:none] [month repr:long] [year]") } else { date }) }
+  if date != none { emph(date-text(date, "[day padding:none] [month repr:long] [year]")) }
 }))
