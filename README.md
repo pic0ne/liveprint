@@ -2,6 +2,8 @@
 
 A Markdown editor that typesets as you type. [Typst](https://typst.app) compiles each edit in the browser and redraws the changed pages in about 40 ms, so the preview is the PDF you download.
 
+It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
+
 ![Typing in liveprint: the typeset pages update on each keystroke with the latency overlay showing about 40 ms, then a click on a heading in the preview moves the editor cursor there, the arrow keys move a highlight through the preview, and a click on the pasted image puts the cursor in its Markdown and lays the highlight over the image](docs/demo.gif)
 
 ## Features
@@ -31,7 +33,7 @@ npm run dev     # start the dev server at http://localhost:5173
 npm run build   # type-check and build the static site into dist/
 ```
 
-`dist/` is a static site with a service worker. Serve it from the root of any static host. The first visit downloads about 33 MB, most of it the compiler, and later visits load from the cache.
+`dist/` is a static site with a service worker. Serve it from any path on a static host. The first visit downloads about 33 MB, or 14 MB from a host that compresses, as GitHub Pages does. Most of it is the compiler, and later visits load from the cache.
 
 ## Tests
 
