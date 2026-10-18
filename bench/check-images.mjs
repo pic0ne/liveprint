@@ -135,7 +135,8 @@ const imageBytes = async (name) =>
 
 const opfsWrite = (folder, name, data) =>
   evaluate(`(async () => {
-    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(${J(folder)}, { create: true });
+    let dir = await navigator.storage.getDirectory();
+    for (const part of ${J(folder)}.split('/')) dir = await dir.getDirectoryHandle(part, { create: true });
     const w = await (await dir.getFileHandle(${J(name)}, { create: true })).createWritable();
     await w.write(${data.startsWith('__images') ? data : J(data)});
     await w.close();
@@ -418,6 +419,12 @@ await type('\n\n![](plot.png)');
 const typedShown = await until('typed image found', () => evaluate(`__frames.findLast((f) => f.rev === __sent && f.final)?.pages.some((p) => p.found.cyan)`)).catch(() => false);
 s = await state();
 check('typing ![](plot.png) shows plot.png from the folder, with no notice', typedShown && s.text.endsWith('\n\n![](plot.png)') && s.notice === '', s);
+await makeImage('chart.png', 'green', 120, 60);
+await opfsWrite('notes/figures', 'chart.png', '__images["chart.png"]');
+await type('\n\n![](figures/chart.png)');
+const nestedShown = await until('image in a subfolder found', () => evaluate(`__frames.findLast((f) => f.rev === __sent && f.final)?.pages.some((p) => p.found.green)`)).catch(() => false);
+s = await state();
+check('typing ![](figures/chart.png) shows chart.png from the subfolder, with no notice', nestedShown && s.notice === '', s);
 
 console.log('\nWithout the File System Access API');
 await page.send('Page.removeScriptToEvaluateOnNewDocument', stub);
