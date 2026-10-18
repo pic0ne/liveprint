@@ -383,10 +383,22 @@ check('a later save knows the folder and asks for none', (await evaluate('__pick
 
 const beforeQuick = (await state()).text;
 await makeImage('quick.png', 'green', 3000, 2000);
+// Ctrl+S goes in from the page just after the paste lands, once the paste's own file action is done: a fast runner
+// finishes compiling the paste within a DevTools round trip.
+const savedWhileCompiling = evaluate(`new Promise((resolve) => {
+  const observer = new MutationObserver(() => {
+    if (!${view}.state.doc.toString().endsWith('![](quick.png)')) return;
+    observer.disconnect();
+    setTimeout(() => {
+      const compiling = !__frames.some((f) => f.rev === __sent && f.final);
+      dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }));
+      resolve(compiling);
+    });
+  });
+  observer.observe(document.querySelector('.cm-content'), { childList: true, subtree: true, characterData: true });
+})`);
 await paste('quick.png');
-await until('quick.png pasted', async () => (await state()).text.endsWith('![](quick.png)'));
-const compiling = await evaluate(`!__frames.some((f) => f.rev === __sent && f.final)`);
-await key('s', { ctrl: true });
+const compiling = await savedWhileCompiling;
 await until('saved right after the paste', async () => !(await state()).edited);
 await settled();
 const quick = await opfsRead('notes', 'quick.png', true);
