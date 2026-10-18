@@ -417,8 +417,9 @@ check('opened fresh, its image is not found, says the bar, and the preview shows
 await markFrames();
 await clickAt(await centreOf('#choose-folder'));
 await until('image read from the folder', async () => (await state()).notice === '');
+// The notice goes when the folder is read, before the worker has the image and redraws.
+first = await until('page 1 redrawn with the folder image', firstFrame);
 await settled();
-first = await firstFrame();
 check('Choose folder reads it from the folder: shown, notice gone', centredAt(first?.page, 'magenta', 200), first?.page.found);
 await makeImage('plot.png', 'cyan', 150, 50);
 await opfsWrite('notes', 'plot.png', '__images["plot.png"]');
@@ -494,8 +495,8 @@ chosen.push([folder]);
 await markFrames();
 await clickAt(await centreOf('#choose-folder'));
 await until('folder read', async () => (await state()).notice === '');
+first = await until('page 1 redrawn with the folder image', firstFrame);
 await settled();
-first = await firstFrame();
 check('Choose folder through the folder input reads the image: shown, notice gone', centredAt(first?.page, 'magenta', 200), first?.page.found);
 
 console.log('\nDropping a Markdown file with its image');
