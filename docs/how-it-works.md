@@ -95,6 +95,12 @@ A `date` written as `YYYY-MM-DD`, with or without a time, is printed in the them
 
 The printed title and authors link both ways, like body text. A date printed in the theme's format is generated text, like a list number, so it has no Markdown to link to.
 
+### Running header
+
+From page 2 on, each theme prints the title in a running header, or the date when there is no title: Book in italics, Paper in small capitals, and Modern with the title on the left and the date on the right. Page 1 is the title page and has no header. Front matter can only open a document, so the title block is always on page 1. Page numbers stay in the footer, as each theme had them.
+
+The header has no setting of its own. A document has one when its front matter gives a title or a date, so the document decides, while page settings belong to the browser and apply to every document. The header is generated text, so it has no Markdown to link to.
+
 ## Files
 
 **Open** (Ctrl+O) reads a Markdown file and **Save** (Ctrl+S) writes it back. **Shift+Ctrl+S**, or Shift-click on **Save**, saves under a new name. You can also drop a `.md`, `.markdown` or `.txt` file on the app, with its images. The bar shows the file's name, and **Edited** while the text differs from what was last opened or saved. **Download .pdf** names the PDF after the file.
