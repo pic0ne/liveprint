@@ -42,12 +42,20 @@ async function connect(url) {
   return { send, listeners };
 }
 
+/** Starts `vite preview` of dist/ on a free port. */
+export async function preview() {
+  const port = await freePort();
+  const server = spawn('node_modules/.bin/vite', ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { stdio: 'ignore' });
+  process.on('exit', () => server.kill());
+  const url = `http://127.0.0.1:${port}/`;
+  await until('vite preview', () => fetch(url).then((r) => r.ok));
+  return { url, server };
+}
+
 /** Starts `vite preview` (unless `serve` is false) and Chrome, and connects to Chrome's first tab. `close()` stops both. */
 export async function launch({ width = 1400, height = 900, serve = true } = {}) {
-  const webPort = await freePort();
-  const server = serve
-    ? spawn('node_modules/.bin/vite', ['preview', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], { stdio: 'ignore' })
-    : null;
+  const web = serve ? await preview() : null;
+  const server = web?.server ?? null;
   const profile = mkdtempSync(join(tmpdir(), 'liveprint-chrome-'));
   const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', `--window-size=${width},${height}`, 'about:blank'], { stdio: 'ignore' });
   const chromeExited = once(chrome, 'exit');
@@ -55,7 +63,6 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
 
   const debugPort = await until('Chrome', async () => readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]);
   const json = (path) => until(path, () => fetch(`http://127.0.0.1:${debugPort}${path}`).then((r) => r.json()));
-  if (serve) await until('vite preview', () => fetch(`http://127.0.0.1:${webPort}/`).then((r) => r.ok));
 
   const browser = await connect((await json('/json/version')).webSocketDebuggerUrl);
   const page = await connect((await json('/json')).find((t) => t.type === 'page').webSocketDebuggerUrl);
@@ -65,7 +72,7 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
     return result.value;
   };
   return {
-    url: `http://127.0.0.1:${webPort}/`,
+    url: web?.url,
     browser,
     page,
     evaluate: evaluateIn(page),
@@ -78,7 +85,7 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
     /** Stops `vite preview` and waits until nothing answers, so the page is left with no network for the app. */
     async stopServer() {
       server?.kill();
-      await until('vite preview stopped', () => fetch(`http://127.0.0.1:${webPort}/`).then(() => false, () => true));
+      await until('vite preview stopped', () => fetch(web.url).then(() => false, () => true));
     },
     async close() {
       chrome.kill();

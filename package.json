@@ -16,10 +16,12 @@
     "bench:load": "vite build --logLevel error && node bench/load.mjs",
     "check:files": "vite build --logLevel error && node bench/check-files.mjs",
     "check:images": "vite build --logLevel error && node bench/check-images.mjs",
-    "check:themes": "vite build --logLevel error && node bench/check-themes.mjs"
+    "check:themes": "vite build --logLevel error && node bench/check-themes.mjs",
+    "check:browsers": "vite build --logLevel error && node bench/check-browsers.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "playwright-core": "1.64.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
