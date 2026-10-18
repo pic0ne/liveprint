@@ -42,6 +42,7 @@ npm test                # run the unit tests
 npm run check:linking   # click in the preview and follow the cursor, in each theme
 npm run check:files     # open, save, restore, and drop files
 npm run check:images    # paste, drop, save, and link images
+npm run check:themes    # fail a theme's font download and recover
 npm run check:browsers  # run the main paths in Chrome, Firefox, and WebKit
 npm run bench:browser   # measure keystroke-to-preview latency
 ```
