@@ -118,6 +118,8 @@ describe('SourceIndex', () => {
     expect(noted.sourceAt(0, 0.51, 0.15)).toBe(13);
     expect(noted.spotOf(35)).toEqual(spot(0, 0.35, 0.8, 0.1, 0, 0.6));
     expect(noted.spotOf(13)).toEqual(spot(0, 0.5, 0.1, 0.1, 0, 0.95));
+    expect(noted.spotOf(22)).toEqual(spot(0, 0.95, 0.1, 0.1, 0, 0.95));
+    expect([0.29, 0.595, 0.02].map((fx) => noted.sourceAt(0, fx, 0.85))).toEqual([34, 40, 30]);
   });
 
   test('a heading in the table of contents links to the heading, which the cursor still marks in the text', () => {
@@ -129,6 +131,8 @@ describe('SourceIndex', () => {
     expect(contents.sourceAt(0, 0.06, 0.15)).toBe(12);
     expect(contents.sourceAt(0, 0.06, 0.45)).toBe(12);
     expect(contents.spotOf(12)).toEqual(spot(0, 0.05, 0.4, 0.1, 0, 0.25));
+    expect(contents.spotOf(16)).toEqual(spot(0, 0.25, 0.4, 0.1, 0, 0.25));
+    expect(contents.sourceAt(0, 0.24, 0.15)).toBe(16);
   });
 });
 

@@ -61,6 +61,35 @@ function continues(line: Line, run: Run): boolean {
   return Math.min(line.bottom, run.y + run.h) > Math.max(line.top, run.y) && run.x >= previous.x + previous.w - 1;
 }
 
+/**
+ * Gives each unpaired character on a line the aside offset of the paired character before it on that line, or
+ * else of the one after it, when that one is an aside's: the spaces, punctuation and number of a footnote then
+ * click through to its definition too.
+ */
+function spreadAsides(pages: LaidOut[], paired: Uint8Array, asides: Int32Array): void {
+  for (const { lines } of pages) {
+    for (const { runs } of lines) {
+      const last = runs[runs.length - 1]!;
+      const [from, to] = [runs[0]!.first, last.first + [...last.run.text].length];
+      let previous = -1;
+      for (let char = from; char < to; char++) {
+        if (paired[char] || (asides[char]! >= 0 && previous !== char - 1)) {
+          previous = char;
+          continue;
+        }
+        if (previous >= 0) {
+          if (asides[previous]! >= 0) asides[char] = asides[previous]! + 1;
+          previous = char;
+          continue;
+        }
+        let next = char + 1;
+        while (next < to && !paired[next] && asides[next]! < 0) next++;
+        if (next < to && asides[next]! >= 0 && !paired[next]) asides[char] = asides[next]!;
+      }
+    }
+  }
+}
+
 /** The folded letters and digits of `pieces`, in order, and the Markdown offset of each. */
 function units(pieces: TextPiece[]): [number[], number[]] {
   const codes: number[] = [];
@@ -171,6 +200,7 @@ export class SourceIndex {
         const char = renderedChar[left[leftPairs[i]!]!]!;
         if (asides[char]! < 0) asides[char] = asideOffset[leftPairs[i + 1]!]!;
       }
+      spreadAsides(laidOut, paired, asides);
     }
     let previous = -1;
     for (let char = 0; char <= offsets.length; char++) {
@@ -217,14 +247,20 @@ export class SourceIndex {
     for (let char = lo; char < offsets.length && offsets[char] === offset; char++) {
       if (this.#paired[char]) return this.#spot(char, false);
     }
-    // Markdown only an aside prints, such as a footnote's text, is found where the aside prints.
+    // Characters an aside prints are not where the text is: the cursor marks them only for Markdown that only an
+    // aside prints, such as a footnote's text.
+    const asides = this.#asides;
+    let before = lo - 1;
+    while (before >= 0 && asides[before]! >= 0) before--;
+    let after = lo;
+    while (after < offsets.length && asides[after]! >= 0) after++;
+    if (before >= 0 && offset === offsets[before]! + 1 && (after === offsets.length || offsets[after]! > offset)) return this.#spot(before, true);
     const aside = this.#asideAt.get(offset);
     if (aside !== undefined) return this.#spot(aside, false);
-    const before = this.#asideAt.get(offset - 1);
-    if (before !== undefined) return this.#spot(before, true);
-    if (lo === offsets.length) return this.#spot(lo - 1, true);
-    if (lo > 0 && offsets[lo]! > offset && offset === offsets[lo - 1]! + 1) return this.#spot(lo - 1, true);
-    return this.#spot(lo, false);
+    const afterAside = this.#asideAt.get(offset - 1);
+    if (afterAside !== undefined) return this.#spot(afterAside, true);
+    if (after < offsets.length) return this.#spot(after, false);
+    return this.#spot(before >= 0 ? before : offsets.length - 1, true);
   }
 
   #spot(char: number, after: boolean): Spot {
