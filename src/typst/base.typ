@@ -16,6 +16,15 @@
   context [#metadata((at: here().position()))<liveprint-image>]
 }
 
+// The front matter's title, authors and date, at the top of the document. Each theme sets its own; this one serves a
+// prelude that sets none. `date` is a datetime, or the text as written.
+#let title-block(title: none, authors: (), date: none) = block(width: 100%, below: 2em, {
+  set par(first-line-indent: 0em, justify: false)
+  if title != none { block(below: 0.8em, text(size: 1.8em, weight: "bold", title)) }
+  if authors.len() > 0 { block(below: 0.5em, authors.join(", ", last: " and ")) }
+  if date != none { if type(date) == datetime { date.display("[month repr:long] [day padding:none], [year]") } else { date } }
+})
+
 #let task(done, body) = {
   box(
     width: 0.72em,

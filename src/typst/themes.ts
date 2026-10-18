@@ -1,3 +1,4 @@
+import { datetime, type FrontMatter, str } from '../convert/toTypst';
 import { MARGIN_MM, type PageSettings, type ThemeId } from '../settings';
 import base from './base.typ?raw';
 import book from './themes/book.typ?raw';
@@ -83,6 +84,29 @@ export const THEMES: Record<ThemeId, Theme> = {
   },
 };
 
-export function preludeFor({ paper, margins, theme }: PageSettings): string {
-  return `${base}\n#set page(paper: "${paper}", margin: ${MARGIN_MM[margins]}mm)\n${THEMES[theme].source}`;
+/**
+ * The `liveprint` dictionary every theme can read: the page settings, and the front matter as plain text. A date the
+ * front matter writes as a calendar date is a `datetime`, any other a string. The PDF takes the title, the authors and
+ * a calendar date; a date it cannot read leaves the PDF without one, rather than with one the page does not print.
+ */
+function variables({ paper, margins }: PageSettings, front: FrontMatter | null): string {
+  const date = front?.date ?? null;
+  const fields = [
+    `paper: ${str(paper)}`,
+    `margin: ${MARGIN_MM[margins]}mm`,
+    `title: ${front?.title ? str(front.title) : 'none'}`,
+    `authors: (${(front?.authors ?? []).map((a) => `${str(a)},`).join(' ')})`,
+    `date: ${date === null ? 'none' : typeof date === 'string' ? str(date) : datetime(date)}`,
+  ];
+  const lines = [`#let liveprint = (${fields.join(', ')})`];
+  if (front) {
+    const pdfDate = date === null ? [] : [`date: ${typeof date === 'string' ? 'none' : 'liveprint.date'}`];
+    lines.push(`#set document(${['title: liveprint.title', 'author: liveprint.authors', ...pdfDate].join(', ')})`);
+  }
+  return lines.join('\n');
+}
+
+export function preludeFor(settings: PageSettings, front: FrontMatter | null = null): string {
+  const { paper, margins, theme } = settings;
+  return `${base}\n${variables(settings, front)}\n#set page(paper: "${paper}", margin: ${MARGIN_MM[margins]}mm)\n${THEMES[theme].source}`;
 }

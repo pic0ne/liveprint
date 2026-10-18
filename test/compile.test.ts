@@ -64,7 +64,7 @@ describe('convert output compiles without errors', () => {
 describe('compileMarkdown shows rejected formulas as typed', () => {
   const rejected = new Map<MathCall, string>();
   const compileText = (markdown: string) =>
-    compileMarkdown(markdown, prelude, new Set(), rejected, (source) => {
+    compileMarkdown(markdown, () => prelude, new Set(), rejected, (source) => {
       compiler.addSource(MAIN_PATH, source);
       return compiler.compile({ mainFilePath: MAIN_PATH, diagnostics: 'full' });
     });
@@ -104,7 +104,7 @@ describe('compileMarkdown shows rejected formulas as typed', () => {
   });
 
   test('a failure that is not a formula is still reported', async () => {
-    const { result, diagnostics = [] } = await compileMarkdown('x', `${prelude}\n#panic("boom")`, new Set(), rejected, (source) => {
+    const { result, diagnostics = [] } = await compileMarkdown('x', () => `${prelude}\n#panic("boom")`, new Set(), rejected, (source) => {
       compiler.addSource(MAIN_PATH, source);
       return compiler.compile({ mainFilePath: MAIN_PATH, diagnostics: 'full' });
     });

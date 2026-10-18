@@ -1,5 +1,5 @@
 import type { DiagnosticsData } from '@myriaddreamin/typst.ts/compiler';
-import { type Converted, convert, type MathCall } from '../convert/toTypst';
+import { type Converted, convert, type FrontMatter, type MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
 import { MAIN_PATH, mainSource } from './compiler';
 
@@ -38,11 +38,11 @@ export function rejectedFormula(source: string, diagnostics: Diagnostic[]): { ca
  * Converts and compiles the Markdown, showing every formula mitex rejects as typed. A failed compile names only the
  * first rejected formula, so each one found is added to `rejected` and the compile runs again. That ends, since every
  * retry adds a formula of this Markdown that the next conversion no longer calls. `rejected` keeps a message for each
- * formula and forgets the ones the Markdown no longer has.
+ * formula and forgets the ones the Markdown no longer has. `prelude` is built for the front matter of each conversion.
  */
 export async function compileMarkdown<R>(
   markdown: string,
-  prelude: string,
+  prelude: (front: FrontMatter | null) => string,
   available: ReadonlySet<ImagePath>,
   rejected: Map<MathCall, string>,
   compile: (source: string) => Promise<Compile<R>>,
@@ -52,7 +52,7 @@ export async function compileMarkdown<R>(
   for (;;) {
     const t0 = performance.now();
     const converted = convert(markdown, available, rejected);
-    const source = mainSource(prelude, converted.typst);
+    const source = mainSource(prelude(converted.frontMatter), converted.typst);
     const t1 = performance.now();
     const { result, diagnostics = [] } = await compile(source);
     convertMs += t1 - t0;

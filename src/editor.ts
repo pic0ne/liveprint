@@ -14,7 +14,7 @@ const highlight = HighlightStyle.define([
   { tag: tags.strikethrough, textDecoration: 'line-through' },
   { tag: [tags.link, tags.url], color: 'var(--link)' },
   { tag: tags.monospace, color: 'var(--code)' },
-  { tag: [tags.processingInstruction, tags.contentSeparator, tags.quote, tags.labelName], color: 'var(--muted)' },
+  { tag: [tags.processingInstruction, tags.contentSeparator, tags.quote, tags.labelName, tags.propertyName], color: 'var(--muted)' },
 ]);
 
 const theme = EditorView.theme({

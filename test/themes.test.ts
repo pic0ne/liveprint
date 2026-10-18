@@ -41,3 +41,28 @@ test.each(THEME_IDS)('wider margins take more pages in %s', async (theme) => {
   expect(normal).toBeLessThanOrEqual(wide);
   expect(narrow).toBeLessThan(wide);
 });
+
+const FRONT = '---\ntitle: A field guide\nauthor: [Ada Byron, Doe]\ndate: 2026-10-18\n---\n\n# The measure\n\nText.\n';
+
+/** The PDF of `markdown` in `theme`, as Latin-1 text, and any error diagnostics. */
+async function pdfOf(markdown: string, theme: ThemeId) {
+  const { typst, frontMatter } = convert(markdown);
+  compiler.addSource(MAIN_PATH, mainSource(preludeFor({ paper: 'a4', margins: 'normal', theme }, frontMatter), typst));
+  const { result, diagnostics = [] } = await compiler.compile({ mainFilePath: MAIN_PATH, format: CompileFormatEnum.pdf, diagnostics: 'unix' });
+  return { pdf: new TextDecoder('latin1').decode(result), errors: diagnostics.filter((d) => /\berror\b/.test(d)) };
+}
+
+test.each(THEME_IDS)('front matter prints a title block in %s and fills the PDF title, authors and date', async (theme) => {
+  const { pdf, errors } = await pdfOf(FRONT, theme);
+  expect(errors).toEqual([]);
+  expect(pdf).toContain('/Title (A field guide)');
+  expect(pdf).toContain('/Author (Ada Byron, Doe)');
+  expect(pdf).toContain('/CreationDate (D:20261018000000Z)');
+});
+
+test('a date that names no calendar day prints, and leaves the PDF without a date', async () => {
+  const { pdf, errors } = await pdfOf('---\ntitle: T\ndate: Spring 2026\n---\n', 'book');
+  expect(errors).toEqual([]);
+  expect(pdf).toContain('/Title (T)');
+  expect(pdf).not.toContain('/CreationDate');
+});

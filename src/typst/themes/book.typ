@@ -27,3 +27,10 @@
 #show table: set text(number-type: "lining")
 #set list(indent: 0.6em, marker: [–])
 #set enum(indent: 0.6em)
+
+#let title-block(title: none, authors: (), date: none) = align(center, block(below: 2.6em, {
+  set par(first-line-indent: 0em, justify: false)
+  if title != none { block(below: 1em, text(size: 2.3em, title)) }
+  if authors.len() > 0 { block(below: 0.6em, text(size: 1.15em, authors.join(", ", last: " and "))) }
+  if date != none { emph(if type(date) == datetime { date.display("[day padding:none] [month repr:long] [year]") } else { date }) }
+}))

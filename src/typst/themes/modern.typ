@@ -24,3 +24,10 @@
 #show table.cell.where(y: 0): set text(font: ("IBM Plex Sans SmBld", "IBM Plex Sans"), weight: "semibold")
 #set list(indent: 0.2em, body-indent: 0.7em)
 #set enum(indent: 0.2em, body-indent: 0.7em)
+
+#let title-block(title: none, authors: (), date: none) = block(width: 100%, below: 2.4em, {
+  if title != none { block(below: 0.7em, par(leading: 0.3em, text(font: ("IBM Plex Sans SmBld", "IBM Plex Sans"), weight: "semibold", size: 2.3em, title))) }
+  let date = if type(date) == datetime { date.display("[day padding:none] [month repr:long] [year]") } else { date }
+  let line = (authors.join(", "), date).filter((part) => part != none)
+  if line.len() > 0 { text(fill: luma(95), line.join([ · ])) }
+})

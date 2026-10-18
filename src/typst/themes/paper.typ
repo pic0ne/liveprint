@@ -22,3 +22,10 @@
 #show table.cell.where(y: 0): set text(weight: "bold")
 #set list(indent: 1em)
 #set enum(indent: 1em)
+
+#let title-block(title: none, authors: (), date: none) = align(center, block(below: 2.2em, {
+  set par(first-line-indent: 0em, justify: false)
+  if title != none { block(above: 0.4em, below: 1.5em, text(size: 1.75em, title)) }
+  if authors.len() > 0 { block(below: 0.9em, text(size: 1.2em, authors.join(h(2.5em)))) }
+  if date != none { text(size: 1.2em, if type(date) == datetime { date.display("[month repr:long] [day padding:none], [year]") } else { date }) }
+}))

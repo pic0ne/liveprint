@@ -90,7 +90,82 @@ const MathSyntax: MarkdownConfig = {
   ],
 };
 
-/** The one Markdown dialect: CommonMark + GFM + `$..$` / `$$..$$` math. The editor and the converter both use it. */
-export const markdownExtensions: MarkdownExtension = [GFM, MathSyntax];
+// The parse's whole input, which a block parser cannot see past the next line through the public API.
+const inputOf = (cx: BlockContext) => (cx as unknown as { input: { read(from: number, to: number): string; length: number } }).input;
+
+/** Front matter longer than this is not looked for. */
+const FRONT_MATTER_MAX = 64 * 1024;
+const FRONT_MATTER = /^---[ \t]*\n(?![ \t]*\n)((?:.*\n)*?)(?:---|\.\.\.)[ \t]*(?:\n|$)/;
+/** A line YAML could hold: blank, a comment, indented, a list item, or a key. Prose is none of these. */
+const YAML_LINE = /^(?:[ \t]*(?:#.*)?|[ \t].*|- .*|-|[\w-][\w -]*:(?:[ \t].*)?)$/;
+const KEY_LINE = /^([\w-][\w -]*?)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$/;
+const ITEM_LINE = /^[ \t]*- (.*?)[ \t]*$/;
+
+/**
+ * A YAML block that opens the document between `---` lines, as Pandoc and static site generators read it. A closing
+ * `---` or `...` line is required, and every line between must be one YAML could hold, so a thematic break at the
+ * top of a document, or one being typed, is never taken for it.
+ */
+function parseFrontMatter(cx: BlockContext, line: Line): boolean {
+  if (cx.lineStart !== 0 || line.pos !== 0 || !line.text.startsWith('---')) return false;
+  const input = inputOf(cx);
+  const match = FRONT_MATTER.exec(input.read(0, Math.min(input.length, FRONT_MATTER_MAX)));
+  const body = match?.[1]!.slice(0, -1).split('\n') ?? [];
+  if (!match || !body.every((text) => YAML_LINE.test(text))) return false;
+
+  const children: Element[] = [cx.elt('FrontMatterMark', 0, 3)];
+  let at = line.text.length + 1;
+  for (const text of body) {
+    const key = KEY_LINE.exec(text);
+    const item = key ? null : ITEM_LINE.exec(text);
+    if (key) {
+      children.push(cx.elt('FrontMatterKey', at, at + key[1]!.length));
+      if (key[2]) children.push(...values(cx, key[2], at + text.indexOf(key[2], key[1]!.length + 1)));
+    } else if (item?.[1]) {
+      children.push(...values(cx, item[1], at + text.lastIndexOf(item[1])));
+    }
+    at += text.length + 1;
+  }
+  children.push(cx.elt('FrontMatterMark', at, at + 3));
+  const end = match[0].replace(/\n$/, '').length;
+  while (cx.lineStart < end && cx.nextLine());
+  cx.addElement(cx.elt('FrontMatter', 0, end, children));
+  return true;
+}
+
+/** The values of a scalar at `from`, or of each item of a `[flow, list]`, without quotes or a trailing comment. */
+function values(cx: BlockContext, raw: string, from: number): Element[] {
+  const flow = /^\[(.*)\]$/.exec(raw);
+  const parts = flow ? [...flow[1]!.matchAll(/(?:"[^"]*"|'[^']*'|[^,])+/g)].map((m) => ({ text: m[0], at: from + 1 + m.index })) : [{ text: raw, at: from }];
+  return parts.flatMap(({ text, at }) => {
+    const lead = text.length - text.trimStart().length;
+    let value = text.trim();
+    at += lead;
+    const quoted = /^(["'])(.*)\1$/.exec(value);
+    if (quoted) {
+      value = quoted[2]!;
+      at += 1;
+    } else {
+      value = value.replace(/\s+#.*$/, '');
+    }
+    return value === '' ? [] : [cx.elt('FrontMatterValue', at, at + value.length)];
+  });
+}
+
+const FrontMatterSyntax: MarkdownConfig = {
+  defineNodes: [
+    { name: 'FrontMatter', block: true },
+    { name: 'FrontMatterMark', style: tags.processingInstruction },
+    { name: 'FrontMatterKey', style: tags.propertyName },
+    { name: 'FrontMatterValue', style: tags.string },
+  ],
+  parseBlock: [{ name: 'FrontMatter', parse: parseFrontMatter, before: 'HorizontalRule' }],
+};
+
+/**
+ * The one Markdown dialect: CommonMark + GFM + `$..$` / `$$..$$` math + YAML front matter. The editor and the
+ * converter both use it.
+ */
+export const markdownExtensions: MarkdownExtension = [GFM, MathSyntax, FrontMatterSyntax];
 
 export const markdownParser = commonmark.configure(markdownExtensions);

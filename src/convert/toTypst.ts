@@ -25,6 +25,23 @@ export interface Converted {
   shownImages: ShownImage[];
   /** The rejected formulas the Markdown has, shown as typed, in document order. */
   typedMath: MathCall[];
+  /** What the front matter says, or null when the Markdown has none with a title, author or date. */
+  frontMatter: FrontMatter | null;
+}
+
+/** A calendar date, as Typst's `datetime(year:, month:, day:)` takes it. */
+export interface CalendarDate {
+  year: number;
+  month: number;
+  day: number;
+}
+
+/** The front matter's title, authors and date, as plain text, for the prelude and the PDF's metadata. */
+export interface FrontMatter {
+  title: string | null;
+  authors: string[];
+  /** A date written `YYYY-MM-DD`, with or without a time, or else the text as written. */
+  date: CalendarDate | string | null;
 }
 
 /** A stretch of the Markdown, from offset `from` up to `to`. */
@@ -53,6 +70,7 @@ interface Doc {
   shownImages: ShownImage[];
   rejected: Pick<ReadonlySet<MathCall>, 'has'>;
   typedMath: MathCall[];
+  frontMatter: FrontMatter | null;
 }
 
 type Emit = (node: SyntaxNode, doc: Doc) => string;
@@ -69,7 +87,8 @@ const defuseLineStart = (markup: string) =>
     marker ? `${space}\\${marker}` : `${space}${digits}\\.`,
   );
 
-function str(text: string): string {
+/** `text` as a Typst string literal. */
+export function str(text: string): string {
   return `"${text.replace(/[\\"\n\r\t]/g, (c) => STRING_ESCAPES[c]!)}"`;
 }
 const STRING_ESCAPES: Record<string, string> = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' };
@@ -321,13 +340,53 @@ function blockImages(node: SyntaxNode, doc: Doc): string | null {
     .join('\n');
 }
 
+/** `2026-10-18`, or `2026-10-18T09:30:00Z` and the like, when it names a real day. */
+export function calendarDate(text: string): CalendarDate | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ][\d:.]+(?:[Zz]|[+-]\d{2}:?\d{2})?)?$/.exec(text);
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? { year, month, day } : null;
+}
+
+export const datetime = ({ year, month, day }: CalendarDate) => `datetime(year: ${year}, month: ${month}, day: ${day})`;
+
+/**
+ * The theme's title block, from the front matter's `title`, `author` and `date`. The title and authors print as
+ * written, so they link. A date that is not a calendar date also prints as written; a calendar date is the theme's
+ * to format. Other keys print nothing.
+ */
+const frontMatter: Emit = (node, doc) => {
+  const fields = new Map<string, SyntaxNode[]>();
+  let key = '';
+  for (const child of childrenOf(node)) {
+    if (child.name === 'FrontMatterKey') fields.set((key = slice(child, doc)), []);
+    else if (child.name === 'FrontMatterValue') fields.get(key)?.push(child);
+  }
+  const [title] = fields.get('title') ?? [];
+  const authors = fields.get('author') ?? [];
+  const [date] = fields.get('date') ?? [];
+  if (!title && authors.length === 0 && !date) return '';
+  const text = (n: SyntaxNode) => slice(n, doc);
+  const printed = (n: SyntaxNode) => `[${textBlock(doc, n.from, n.to)}]`;
+  const calendar = date ? calendarDate(text(date)) : null;
+  doc.frontMatter = { title: title ? text(title) : null, authors: authors.map(text), date: calendar ?? (date ? text(date) : null) };
+  const args = [
+    `title: ${title ? printed(title) : 'none'}`,
+    `authors: (${authors.map((a) => `${printed(a)},`).join(' ')})`,
+    `date: ${calendar ? datetime(calendar) : date ? printed(date) : 'none'}`,
+  ];
+  return `#title-block(${args.join(', ')})`;
+};
+
 const MARKS = new Set([
   'ListMark', 'QuoteMark', 'HeaderMark', 'EmphasisMark', 'CodeMark', 'CodeInfo', 'LinkMark', 'LinkLabel', 'LinkTitle',
-  'TaskMarker', 'StrikethroughMark', 'TableDelimiter', 'MathMark',
+  'TaskMarker', 'StrikethroughMark', 'TableDelimiter', 'MathMark', 'FrontMatterMark', 'FrontMatterKey', 'FrontMatterValue',
 ]);
 
 const EMITTERS: Record<string, Emit> = {
   Document: (node, doc) => blocks(childrenOf(node), doc),
+  FrontMatter: frontMatter,
   Paragraph: (node, doc) => blockImages(node, doc) ?? inline(node, doc),
   ATXHeading1: heading(1), ATXHeading2: heading(2), ATXHeading3: heading(3),
   ATXHeading4: heading(4), ATXHeading5: heading(5), ATXHeading6: heading(6),
@@ -426,7 +485,7 @@ export function convert(
 ): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [] };
+  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null };
   const typst = `${emit(root, doc)}\n`;
-  return { typst, pieces: doc.pieces, images: [...doc.images], shownImages: doc.shownImages, typedMath: doc.typedMath };
+  return { typst, pieces: doc.pieces, images: [...doc.images], shownImages: doc.shownImages, typedMath: doc.typedMath, frontMatter: doc.frontMatter };
 }

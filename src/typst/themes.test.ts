@@ -20,3 +20,11 @@ test.each(Object.values(THEMES))('every face $label measures text in is loaded a
   const loaded = new Set<string>([...FONT_FILES, ...fonts]);
   expect(text.filter((path) => !loaded.has(path))).toEqual([]);
 });
+
+test('preludeFor gives the theme the liveprint variables, and the PDF the front matter', () => {
+  const front = { title: 'A "guide"', authors: ['Ada', 'Doe'], date: { year: 2026, month: 10, day: 18 } };
+  const lines = preludeFor({ paper: 'a4', margins: 'narrow', theme: 'book' }, front).split('\n');
+  expect(lines).toContain('#let liveprint = (paper: "a4", margin: 18mm, title: "A \\"guide\\"", authors: ("Ada", "Doe",), date: datetime(year: 2026, month: 10, day: 18))');
+  expect(lines).toContain('#set document(title: liveprint.title, author: liveprint.authors, date: liveprint.date)');
+  expect(preludeFor({ paper: 'a4', margins: 'narrow', theme: 'book' }).split('\n')).toContain('#let liveprint = (paper: "a4", margin: 18mm, title: none, authors: (), date: none)');
+});

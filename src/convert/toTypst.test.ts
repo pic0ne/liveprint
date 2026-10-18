@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import sample from '../sample.md?raw';
 import type { ImagePath } from '../images';
-import { convert, type MathCall, type TextPiece } from './toTypst';
+import { calendarDate, convert, type MathCall, type TextPiece } from './toTypst';
 
 const cases: [string, string, string][] = [
   ['ATX and setext headings', '# Title #\n\nSetext\n---', '#heading(level: 1)[Title]\n\n#heading(level: 2)[Setext]'],
@@ -176,4 +176,64 @@ test('the sample\'s pieces run forward through the Markdown and copy it', () => 
   const out = pieces.filter((p, i) => !copies(p) || (i > 0 && p.from < pieces[i - 1]!.from + pieces[i - 1]!.text.length));
   expect(pieces.length).toBeGreaterThan(200);
   expect(out).toEqual([]);
+});
+
+describe('convert: front matter', () => {
+  const FRONT = '---\ntitle: "A *field* guide"\nauthor: [Ada Byron, "Doe, J."]\ndate: 2026-10-18\nlayout: post\n---\n\n# Hi\n';
+
+  test('is a title block from the title, authors and date, with other keys left out', () => {
+    expect(convert(FRONT).typst).toBe(
+      '#title-block(title: [A \\*field\\* guide], authors: ([Ada Byron], [Doe, J.],), date: datetime(year: 2026, month: 10, day: 18))\n\n#heading(level: 1)[Hi]\n',
+    );
+  });
+
+  test('gives the title and authors as plain text, and the date as a calendar date', () => {
+    expect(convert(FRONT).frontMatter).toEqual({ title: 'A *field* guide', authors: ['Ada Byron', 'Doe, J.'], date: { year: 2026, month: 10, day: 18 } });
+  });
+
+  test('the printed title and authors link to where they are written', () => {
+    expect(convert(FRONT).pieces.slice(0, 3)).toEqual([
+      { from: 12, text: 'A *field* guide' },
+      { from: 38, text: 'Ada Byron' },
+      { from: 50, text: 'Doe, J.' },
+    ]);
+  });
+
+  test('a date that names no calendar day prints as written', () => {
+    const { typst, frontMatter, pieces } = convert('---\ndate: Spring 2026\n---\n');
+    expect(typst).toBe('#title-block(title: none, authors: (), date: [Spring 2026])\n');
+    expect(frontMatter).toEqual({ title: null, authors: [], date: 'Spring 2026' });
+    expect(pieces).toEqual([{ from: 10, text: 'Spring 2026' }]);
+    expect(convert('---\ndate: 2026-02-30\n---\n').frontMatter?.date).toBe('2026-02-30');
+  });
+
+  test('a block list of authors, an ellipsis to close, and a comment after a value', () => {
+    expect(convert('---\ntitle: Notes # draft\nauthor:\n  - A\n  - B\n...\n').frontMatter).toEqual({ title: 'Notes', authors: ['A', 'B'], date: null });
+  });
+
+  test('without a title, author or date there is no title block', () => {
+    expect(convert('---\nlayout: post\n---\n\nText').typst).toBe('Text\n');
+    expect(convert('---\nlayout: post\n---\n\nText').frontMatter).toBeNull();
+  });
+
+  test.each([
+    ['an unclosed block', '---\ntitle: x\n', '#line(length: 100%)\n\ntitle: x\n'],
+    ['a blank line after the opening', '---\n\ntitle: x\n---\n', '#line(length: 100%)\n\n#heading(level: 2)[title: x]\n'],
+    ['prose between the rules', '---\nSome prose\n---\n', '#line(length: 100%)\n\n#heading(level: 2)[Some prose]\n'],
+    ['a block that does not open the document', 'Intro\n\n---\ntitle: x\n---\n', 'Intro\n\n#line(length: 100%)\n\n#heading(level: 2)[title: x]\n'],
+  ])('%s is not front matter', (_, markdown, typst) => {
+    expect(convert(markdown).typst).toBe(typst);
+  });
+});
+
+test.each([
+  ['2026-10-18', { year: 2026, month: 10, day: 18 }],
+  ['2024-02-29', { year: 2024, month: 2, day: 29 }],
+  ['2026-10-18T09:30:00Z', { year: 2026, month: 10, day: 18 }],
+  ['2026-10-18 09:30', { year: 2026, month: 10, day: 18 }],
+  ['2025-02-29', null],
+  ['2026-13-01', null],
+  ['18 October 2026', null],
+])('calendarDate(%j)', (text, date) => {
+  expect(calendarDate(text)).toEqual(date);
 });

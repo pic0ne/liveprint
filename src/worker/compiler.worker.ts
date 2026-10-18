@@ -190,7 +190,7 @@ const diagnosticText = ({ package: pkg, path, range, severity, message }: Diagno
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const settings = applied!;
   try {
-    const { converted, result, diagnostics = [], convertMs, compileMs } = await compileMarkdown(markdown, preludeFor(settings), available, rejected, (source) => {
+    const { converted, result, diagnostics = [], convertMs, compileMs } = await compileMarkdown(markdown, (front) => preludeFor(settings, front), available, rejected, (source) => {
       compiler.addSource(MAIN_PATH, source);
       return compiler.compile({ mainFilePath: MAIN_PATH, incrementalServer: server, diagnostics: 'full' });
     });
