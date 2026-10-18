@@ -5,7 +5,7 @@
 // in Paper, whose face Chrome cannot load, where only the selected text is checked). A word's box is found in the
 // page's pixels, as the ink between the gaps that separate its run's words, so neither the source index nor its
 // character measuring decides what counts as correct. A formula mitex rejects is added to the first paragraph, and
-// a word of its LaTeX, shown as typed, is sampled too, as are words of a front matter title and author. Then (d) a click on each symbol of a formula puts the cursor
+// a word of its LaTeX, shown as typed, is sampled too, as are words of a front matter title and author, which the running header repeats from page 2 on. Then (d) a click on each symbol of a formula puts the cursor
 // in that symbol's LaTeX, and (e) a drag across two lines selects and copies the text between.
 // node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
 import { parseArgs } from 'node:util';
@@ -143,10 +143,16 @@ function kindAt(offset) {
   return 'text';
 }
 
-const allText = pages.flatMap((p) => p.runs.map((r) => r.text)).join('\n');
+// The running header prints the front matter's title from page 2 on, inside the top margin, as generated text.
+const MARGIN_PT = (25 / 25.4) * 72;
+const inHeader = (run) => run.y + run.h < MARGIN_PT;
+const headers = pages.map(({ runs }) => runs.filter(inHeader).map((r) => r.text).join(' '));
+const headerOk = headers[0] === '' && headers.slice(1).every((text) => text.includes('Quillwort almanac'));
+const allText = pages.flatMap((p) => p.runs.filter((r) => !inHeader(r)).map((r) => r.text)).join('\n');
 const candidates = [];
 pages.forEach(({ height, runs }, p) =>
   runs.forEach((run, r) => {
+    if (inHeader(run)) return;
     for (const word of wordBoxes(run.text, ink[p][r]) ?? []) {
       const token = run.text.slice(word.from, word.to);
       const text = token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
@@ -392,10 +398,11 @@ const sorted = sourcedMs.sort((a, b) => a - b);
 console.log(`\n${results.length} words on ${new Set(results.map((r) => r.page)).size} of ${pages.length} pages, from ${candidates.length} unambiguous candidates; ${failed.length} failed`);
 console.log(`clicks on the symbols of ${FORMULA}: ${formulaOk ? 'pass' : 'FAIL'} ${formulaResults.map((r) => `${r.symbol} ${r.ok ? 'ok' : `at ${JSON.stringify(r.at)}`}`).join(', ') || 'no formula line found'}`);
 console.log(`drag from ${JSON.stringify(from?.text)} to ${JSON.stringify(to?.text)} and copy: ${dragged.ok ? 'pass' : 'FAIL'} ${JSON.stringify(dragged.text)}`);
+console.log(`running header: ${headerOk ? 'pass' : 'FAIL'} ${JSON.stringify(headers.slice(0, 3))}`);
 console.log(`front matter in the editor: ${highlightOk ? 'pass' : 'FAIL'} ${JSON.stringify(colours)}`);
 console.log(`click to source offset: median ${sorted[sorted.length >> 1].toFixed(1)} ms, max ${sorted[sorted.length - 1].toFixed(1)} ms`);
 console.log(`edit then locate: visible pages after ${timing.drawn.toFixed(1)} ms, located after ${timing.located.toFixed(1)} ms`);
 const kinds = new Set(results.map((r) => r.kind));
 const missing = KINDS.filter((k) => !kinds.has(k));
 if (missing.length > 0) console.log(`no unambiguous word found of kind: ${missing.join(', ')}`);
-process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk || !highlightOk ? 1 : 0);
+process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk || !highlightOk || !headerOk ? 1 : 0);
