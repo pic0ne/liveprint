@@ -61,6 +61,11 @@ async function type(text) {
   }
 }
 
+const box = (selector) => evaluate(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+async function clickAt(at, modifiers = 0) {
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1, modifiers });
+}
+
 const cursorToEnd = () => evaluate(`(() => { const v = ${view}; v.dispatch({ selection: { anchor: v.state.doc.length } }); v.focus(); })()`);
 
 /** Waits until the worker's final pages of the newest edit are painted, and returns how many pages there are. */
@@ -343,7 +348,6 @@ s = await state();
 check('a reload with no unsaved changes does not ask', dialogs.length === 0, dialogs);
 check('it restores the last document, clean', s.name === 'notes.md' && !s.edited, s);
 
-const box = (selector) => evaluate(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
 async function drop(paths, at) {
   const data = { items: [], files: [paths].flat(), dragOperationsMask: 1 };
   for (const type of ['dragEnter', 'dragOver', 'drop']) await page.send('Input.dispatchDragEvent', { type, ...at, data });
@@ -468,6 +472,98 @@ await c.close();
 await sleep(300);
 const d = await openTab();
 check('a new tab, after the others closed, takes the newest document no open tab holds', (await textIn(d.evaluate)) === 'Tab C.', await textIn(d.evaluate));
+
+console.log('\nRecent documents');
+const panelOpen = () => evaluate(`!document.getElementById('recent-panel').hidden`);
+async function showRecent() {
+  if (!(await panelOpen())) await clickAt(await box('.recent-toggle'));
+  await until('the recent list shown', panelOpen);
+  return evaluate(`[...document.querySelectorAll('#recent-panel .recent-row')].map((r) => ({
+    name: r.querySelector('.recent-name').textContent,
+    when: r.querySelector('.recent-when').textContent,
+    dateTime: r.querySelector('time')?.dateTime ?? null,
+    preview: r.querySelector('.recent-preview').textContent,
+    disabled: r.getAttribute('aria-disabled') === 'true',
+  }))`);
+}
+const ROW = (preview) => `[...document.querySelectorAll('.recent-row')].find((r) => r.querySelector('.recent-preview').textContent === ${J(preview)})`;
+const rowAt = (preview) => evaluate(`(() => { const r = ${ROW(preview)}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+const keptAtOf = (text) =>
+  evaluate(`new Promise((resolve) => {
+    indexedDB.open('liveprint').onsuccess = ({ target: { result: db } }) => {
+      db.transaction('docs').objectStore('docs').getAll().onsuccess = ({ target }) => {
+        db.close();
+        resolve(target.result.find((r) => r.text === ${J(text)})?.keptAt ?? null);
+      };
+    };
+  })`);
+
+let rows = await showRecent();
+check('the list shows the document another tab holds, disabled, saying it is open there', rows.some((r) => r.preview === 'Tab C.' && r.name === 'dropped.md' && r.disabled && r.when === 'Open in another tab' && r.dateTime === null), rows);
+const e = await openTab();
+check('a tab opened meanwhile takes the closed tab’s document', (await textIn(e.evaluate)) === 'Tab B.', await textIn(e.evaluate));
+dialogs.length = 0;
+await clickAt(await rowAt('Tab B.'));
+await until('the open failed', async () => (await state()).failure !== '').catch(() => null);
+s = await state();
+check('opening a document another tab took after the list was read fails, and the line says why', s.failure === 'Could not open Untitled.md: it is open in another tab' && s.text === 'Tab A again.' && dialogs.length === 0, { s, dialogs });
+const f = await openTab();
+await setIn(f.evaluate, 'x');
+await setIn(f.evaluate, '');
+await sleep(400);
+await f.close();
+await e.close();
+await sleep(300);
+
+rows = await showRecent();
+const keptB = await keptAtOf('Tab B.');
+const b2 = rows.find((r) => r.preview === 'Tab B.');
+check('a closed tab’s document is listed, with its name, first line and when it was last edited', b2?.name === 'Untitled.md' && !b2.disabled && /^(now|\d+ minutes? ago)$/.test(b2.when) && b2.dateTime === new Date(keptB).toISOString(), { rows, keptB });
+check('this tab’s own document and an empty Untitled.md are not listed', rows.length === 2 && rows.every((r) => r.preview !== 'Tab A again.' && r.preview !== ''), rows);
+await clickAt(await rowAt('Tab C.'));
+await sleep(300);
+check('clicking the held document opens nothing and leaves the list up', (await textIn(evaluate)) === 'Tab A again.' && (await panelOpen()));
+
+// A write transaction from another connection holds up the read of the document opened, so the two keystrokes
+// typed meanwhile are still waiting to be written when the tab moves to the other record.
+await evaluate(`new Promise((resolve) => {
+  indexedDB.open('liveprint').onsuccess = ({ target: { result: db } }) => {
+    const store = db.transaction('docs', 'readwrite').objectStore('docs');
+    window.__unblock = false;
+    const busy = () => (window.__unblock ? db.close() : (store.count().onsuccess = busy));
+    busy();
+    resolve();
+  };
+})`);
+dialogs.length = 0;
+await evaluate(`${ROW('Tab B.')}.click()`);
+await sleep(200);
+await evaluate(`(() => {
+  const v = ${view};
+  v.dispatch({ changes: { from: v.state.doc.length, insert: ' Unsaved' } });
+  v.dispatch({ changes: { from: v.state.doc.length, insert: '.' } });
+  window.__unblock = true;
+})()`);
+await until('the recent document open', async () => (await state()).text === 'Tab B.');
+await settled();
+s = await state();
+check('opening a listed document shows its text and name, without asking', s.name === 'Untitled.md' && s.edited && s.title === '• Untitled.md · liveprint' && s.failure === '' && dialogs.length === 0 && !(await panelOpen()), { s, dialogs });
+await sleep(500);
+check('opening it leaves when it was last edited alone', (await keptAtOf('Tab B.')) === keptB, { before: keptB, after: await keptAtOf('Tab B.') });
+await load(() => page.send('Page.reload'));
+check('a reload comes back to the document opened from the list', (await textIn(evaluate)) === 'Tab B.', await textIn(evaluate));
+
+rows = await showRecent();
+check('the document left behind is listed, with the text typed just before the switch', rows.some((r) => r.name === 'dropped.md' && r.preview === 'Tab A again. Unsaved.' && !r.disabled), rows);
+await clickAt(await rowAt('Tab A again. Unsaved.'));
+await until('the left document open again', async () => (await state()).name === 'dropped.md');
+s = await state();
+check('it opens back with that text intact, still Edited', s.text === 'Tab A again. Unsaved.' && s.edited && s.failure === '', s);
+
+await showRecent();
+await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+check('Escape closes the list and puts focus back on its button', !(await panelOpen()) && (await evaluate(`document.activeElement.classList.contains('recent-toggle')`)));
 await d.close();
 
 if (args.shots) await screenshots(args.shots);
@@ -511,10 +607,7 @@ s = await state();
 check('Ctrl+S downloads the text under the file name', file.name === 'fallback.md' && file.bytes === `${FALLBACK}Typed.`, file);
 check('after the download it is clean', !s.edited && s.title === 'fallback.md · liveprint', s);
 await type(' Again.');
-file = await nextDownload(async () => {
-  const at = await box('#save');
-  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1, modifiers: 8 });
-});
+file = await nextDownload(async () => clickAt(await box('#save'), 8));
 check('Shift-click on Save is also a download without the API', file.name === 'fallback.md' && file.bytes === `${FALLBACK}Typed. Again.`, file);
 file = await nextDownload(() => evaluate(`document.getElementById('download-pdf').click()`));
 check('Download .pdf is named after the file', file.name === 'fallback.pdf' && file.bytes.startsWith('%PDF'), file.name);
@@ -590,6 +683,19 @@ async function screenshots(out) {
         check(`${width} px ${scheme}${name === LONG ? ', long name' : edited ? ', edited' : ''}: the bar ${width > 720 ? 'is one row' : 'has two rows'}, the name clear of the buttons, every button on screen${name === LONG && width <= 720 ? ', the name cut short' : ''}`, bar.height < (width > 720 ? 50 : 90) && bar.inside && bar.clear && bar.edited === edited && (name !== LONG || width > 720 || bar.truncated), bar);
         console.log(`     ${file}`);
       }
+      await clickAt(await box('.recent-toggle'));
+      await until('the recent list shown', () => evaluate(`!document.getElementById('recent-panel').hidden`));
+      await sleep(200);
+      const panel = await evaluate(`(() => {
+        const bar = document.querySelector('.bar').getBoundingClientRect();
+        const r = document.getElementById('recent-panel').getBoundingClientRect();
+        return { bar: bar.height, rows: document.querySelectorAll('.recent-row').length, left: r.left, right: r.right, bottom: r.bottom };
+      })()`);
+      const file = join(out, `recent-${width}-${scheme}.png`);
+      writeFileSync(file, Buffer.from((await page.send('Page.captureScreenshot', { clip: { x: 0, y: 0, width, height: Math.min(height, Math.ceil(panel.bottom) + 24), scale: 1 } })).data, 'base64'));
+      check(`${width} px ${scheme}: the recent list opens on screen, under a bar ${width > 720 ? 'of one row' : 'of two rows'}`, panel.bar < (width > 720 ? 50 : 90) && panel.rows > 0 && panel.left >= 0 && panel.right <= width && panel.bottom <= height, panel);
+      console.log(`     ${file}`);
+      await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     }
   }
   await page.send('Emulation.clearDeviceMetricsOverride');
