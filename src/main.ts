@@ -286,16 +286,22 @@ async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   await workerImages.show(next);
 }
 
+/**
+ * Shows `doc` in the editor at once, so a key pressed while its images go to the worker types into it, not into the
+ * document it replaced. The worker gets the editor's text once it has the images.
+ */
 async function openDoc(doc: Doc): Promise<void> {
   file = doc.file;
   showDiskChange(false);
   watchDisk();
   referenced = [];
   looked = new Set();
-  await setImages(doc.images);
+  const shown = setImages(doc.images);
   load(doc.text);
   $('pages').scrollTop = 0;
-  changed(doc.text);
+  showFile(doc.text);
+  await shown;
+  changed(editor.state.doc.toString());
 }
 
 /** Inserts `![](path)` for each image file at `at`, or over the selection. Other files are named in the failure line. */
@@ -438,7 +444,10 @@ window.addEventListener('drop', (e) => {
   e.preventDefault();
   const dropped = droppedFile(e.dataTransfer);
   if (dropped) {
-    if (mayDiscard()) void fileAction('open the dropped file', async () => openDoc(await dropped));
+    void fileAction('open the dropped file', async () => {
+      const doc = await dropped;
+      if (mayDiscard()) await openDoc(doc);
+    });
     return;
   }
   const onEditor = e.target instanceof Node && editor.dom.contains(e.target);

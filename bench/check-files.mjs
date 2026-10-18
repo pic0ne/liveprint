@@ -81,9 +81,39 @@ const opfsWrite = (name, text) =>
   })()`);
 const opfsRead = (name) => evaluate(`(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle(${J(name)})).getFile()).text())()`);
 
-/** Records each edit sent to the worker and the newest pages message, so a check can wait for the preview. */
+/**
+ * Records each edit sent to the worker and the newest pages message, so a check can wait for the preview. `__hold`
+ * stops the open picker, the read of a dropped file or the reading of image bytes until `__release`, so a check can
+ * type while an open is in progress.
+ */
 const WATCH_WORKER = `
   window.__pages = { sent: -1, rev: -1, final: false, readyAt: NaN };
+  window.__holds = {};
+  window.__hold = (name) => {
+    let release;
+    const promise = new Promise((resolve) => (release = resolve));
+    __holds[name] = { promise, release, reached: 0 };
+  };
+  window.__release = (name) => {
+    __holds[name]?.release();
+    delete __holds[name];
+  };
+  window.__held = async (name) => {
+    const hold = __holds[name];
+    if (!hold) return;
+    hold.reached++;
+    await hold.promise;
+  };
+  const arrayBuffer = Blob.prototype.arrayBuffer;
+  Blob.prototype.arrayBuffer = async function () {
+    await __held('bytes');
+    return arrayBuffer.call(this);
+  };
+  const getHandle = DataTransferItem.prototype.getAsFileSystemHandle;
+  DataTransferItem.prototype.getAsFileSystemHandle = function () {
+    const handle = getHandle.call(this);
+    return __held('drop').then(() => handle);
+  };
   window.__asked = [];
   const request = FileSystemHandle.prototype.requestPermission;
   FileSystemHandle.prototype.requestPermission = function (descriptor) {
@@ -111,6 +141,7 @@ const STUB_PICKERS = `
   window.__picker = { open: null, save: null, opened: 0, saved: 0, suggested: null };
   window.showOpenFilePicker = async () => {
     __picker.opened++;
+    await __held('picker');
     return [await (await navigator.storage.getDirectory()).getFileHandle(__picker.open)];
   };
   window.showSaveFilePicker = async ({ suggestedName }) => {
@@ -257,8 +288,8 @@ check('a reload with no unsaved changes does not ask', dialogs.length === 0, dia
 check('it restores the last document, clean', s.name === 'notes.md' && !s.edited, s);
 
 const box = (selector) => evaluate(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-async function drop(path, at) {
-  const data = { items: [], files: [path], dragOperationsMask: 1 };
+async function drop(paths, at) {
+  const data = { items: [], files: [paths].flat(), dragOperationsMask: 1 };
   for (const type of ['dragEnter', 'dragOver', 'drop']) await page.send('Input.dispatchDragEvent', { type, ...at, data });
 }
 const DROPPED = '# Dropped\n\nFrom the desktop.\n';
@@ -289,9 +320,59 @@ s = await state();
 const href = await evaluate('location.href');
 check('a dropped image is inserted, on the editor or the preview, and neither opens nor navigates away nor asks', href === url && s.name === 'dropped.md' && s.text.match(/!\[\]\(photo\.png\)/g)?.length === 2 && dialogs.length === 0, { href, s, dialogs });
 
+console.log('\nTyping while a file opens');
+const holding = (name) => until(`${name} held`, () => evaluate(`__holds[${J(name)}]?.reached > 0`));
+const setIn = (ev, text) => ev(`(() => { const v = ${view}; v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: ${J(text)} } }); })()`);
+await evaluate(`__picker.open = 'notes.md'`);
+await key('o', { ctrl: true });
+await until('notes.md open', async () => (await state()).name === 'notes.md' && !(await state()).edited);
+const clean = (await state()).text;
+
+await evaluate(`__hold('picker')`);
+answers.length = 0;
+await key('o', { ctrl: true });
+await holding('picker');
+await cursorToEnd();
+await type(' Typed.');
+dialogs.length = 0;
+answers.push(false);
+await evaluate(`__release('picker')`);
+await until('discard asked', async () => dialogs.length === 1).catch(() => null);
+await sleep(200);
+s = await state();
+check('text typed while the open picker is up makes Ctrl+O ask first, and declining keeps it', dialogs[0]?.message === 'Discard unsaved changes to notes.md?' && s.text === `${clean} Typed.` && s.edited, { dialogs, s });
+await setIn(evaluate, clean);
+
+await evaluate(`__hold('drop')`);
+answers.length = 0;
+dialogs.length = 0;
+await drop(join(dir, 'dropped.md'), await box('#pages'));
+await holding('drop');
+await cursorToEnd();
+await type(' Typed.');
+answers.push(false);
+await evaluate(`__release('drop')`);
+await until('discard asked', async () => dialogs.length === 1).catch(() => null);
+await sleep(200);
+s = await state();
+check('text typed while a dropped file is read makes the drop ask first, and declining keeps it', dialogs[0]?.message === 'Discard unsaved changes to notes.md?' && s.text === `${clean} Typed.` && s.name === 'notes.md', { dialogs, s });
+await setIn(evaluate, clean);
+
+await evaluate(`__hold('bytes')`);
+answers.length = 0;
+dialogs.length = 0;
+await drop([join(dir, 'dropped.md'), png], await box('#pages'));
+await holding('bytes');
+await cursorToEnd();
+await type(' Typed.');
+await evaluate(`__release('bytes')`);
+await until('dropped.md open', async () => (await state()).name === 'dropped.md');
+await settled();
+s = await state();
+check('text typed while a dropped file’s images load goes into the opened file and stays', s.text === `${DROPPED} Typed.` && s.edited && dialogs.length === 0, { dialogs, s });
+
 console.log('\nSeveral tabs');
 const textIn = (ev) => ev(`${view}.state.doc.toString()`);
-const setIn = (ev, text) => ev(`(() => { const v = ${view}; v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: ${J(text)} } }); })()`);
 const docId = (ev) => ev(`sessionStorage.getItem('liveprint.doc')`);
 async function openTab(beforeLoad) {
   const tab = await newTab();
