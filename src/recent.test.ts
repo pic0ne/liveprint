@@ -11,6 +11,9 @@ test.each([
   ['#\nBody', ''],
   ['', ''],
   [`${'a'.repeat(250)}`, 'a'.repeat(200)],
+  ['---\ntitle: "Field notes"\nauthor: Ada\n---\n\n# Body', 'Field notes'],
+  ['---\nauthor: Ada\n---\n\n# Body', 'Body'],
+  ['---\ntitle: >-\n  Long\n---\nFirst line', 'First line'],
 ])('the preview of %j is %j', (text, preview) => {
   expect(previewLine(text)).toBe(preview);
 });

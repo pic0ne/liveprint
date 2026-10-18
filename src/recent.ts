@@ -25,9 +25,16 @@ export interface KeptDoc {
 /** Longer than any panel shows, so a line of pasted data never goes whole into the page. */
 const PREVIEW_CHARS = 200;
 
-/** The first non-empty line of `text`, trimmed, with the marks of a `#` heading stripped. */
+const FRONT_MATTER = /^---[ \t]*\n([^]*?)\n(?:---|\.\.\.)[ \t]*(?:\n|$)/;
+
+/**
+ * The front matter's title, or else the first non-empty line of `text` after any front matter, trimmed, with the
+ * marks of a `#` heading stripped.
+ */
 export function previewLine(text: string): string {
-  const line = text.split('\n').find((l) => l.trim() !== '') ?? '';
+  const front = FRONT_MATTER.exec(text);
+  const title = front && /^title:[ \t]*["']?(.*?)["']?[ \t]*$/m.exec(front[1]!)?.[1]?.replace(/^[|>][+-]?$/, '');
+  const line = title || (text.slice(front?.[0].length ?? 0).split('\n').find((l) => l.trim() !== '') ?? '');
   return line
     .trim()
     .replace(/^#{1,6}(\s+|$)/, '')
