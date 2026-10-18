@@ -1,3 +1,4 @@
+import { Popover } from './popover';
 import { MARGINS, MARGINS_LABEL, type PageSettings, PAPER_LABEL, PAPERS, parseSettings, THEME_IDS, type ThemeId } from './settings';
 import { THEMES } from './typst/themes';
 
@@ -20,8 +21,7 @@ const settingsLabel = (s: PageSettings) => `${PAPER_LABEL[s.paper]} · ${MARGINS
 
 /**
  * The top bar's page settings: a button that names the current choice and opens a panel of segmented radio groups.
- * A change applies at once. Escape or a click outside closes the panel. Each theme's name is set in its own face,
- * loaded the first time the panel opens.
+ * A change applies at once. Each theme's name is set in its own face, loaded the first time the panel opens.
  */
 export class SettingsMenu {
   readonly #button: HTMLButtonElement;
@@ -39,30 +39,13 @@ export class SettingsMenu {
     this.#panel.append(...GROUPS.map((group) => this.#group(group)));
     this.#render();
 
-    this.#button.addEventListener('click', () => (this.#panel.hidden ? this.#open() : this.#close()));
     this.#panel.addEventListener('change', (e) => {
       const input = e.target as HTMLInputElement;
       this.#settings = parseSettings({ ...this.#settings, [input.name]: input.value }, this.#settings);
       this.#render();
       this.#onChange(this.#settings);
     });
-    root.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || this.#panel.hidden) return;
-      e.preventDefault();
-      this.#close();
-      this.#button.focus();
-    });
-    root.addEventListener('focusout', (e) => {
-      const to = e.relatedTarget as Node | null;
-      if (to && !root.contains(to)) this.#close();
-    });
-    document.addEventListener('pointerdown', (e) => {
-      if (this.#panel.hidden || root.contains(e.target as Node)) return;
-      const hadFocus = root.contains(document.activeElement);
-      this.#close();
-      // A click on something focusable keeps that focus. Otherwise focus returns to the button, not the page.
-      if (hadFocus) setTimeout(() => document.activeElement === document.body && this.#button.focus({ preventScroll: true }));
-    });
+    new Popover(root, this.#button, this.#panel, () => this.#open());
   }
 
   /** Shows `settings` as the choice, without calling back: the page's own correction, not the reader's. */
@@ -105,7 +88,8 @@ export class SettingsMenu {
     }
   }
 
-  #open(): void {
+  /** Loads the theme faces the first time, and focuses the checked choice. */
+  #open(): HTMLInputElement | null {
     if (!this.#facesLoaded) {
       this.#facesLoaded = true;
       const rules = THEME_IDS.map(
@@ -113,13 +97,6 @@ export class SettingsMenu {
       );
       document.head.append(Object.assign(document.createElement('style'), { textContent: rules.join('\n') }));
     }
-    this.#panel.hidden = false;
-    this.#button.setAttribute('aria-expanded', 'true');
-    this.#panel.querySelector<HTMLInputElement>('input:checked')?.focus();
-  }
-
-  #close(): void {
-    this.#panel.hidden = true;
-    this.#button.setAttribute('aria-expanded', 'false');
+    return this.#panel.querySelector<HTMLInputElement>('input:checked');
   }
 }
