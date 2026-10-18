@@ -73,6 +73,8 @@ export type ToWorker =
 
 export type FromWorker =
   | { kind: 'ready'; bootMs: number }
+  /** How much of the compiler WebAssembly has arrived on a first visit, in bytes. `total` is null when not known. */
+  | { kind: 'loading'; loaded: number; total: number | null }
   | {
       kind: 'pages';
       rev: Rev;

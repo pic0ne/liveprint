@@ -396,6 +396,23 @@ button:focus-visible {
   color: var(--failure);
 }
 
+/* Only on a first visit, until the first pages show. */
+.loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.loading[hidden] {
+  display: none;
+}
+
 /* Where the editor's cursor renders. Laid over the page, never in the way of a click. */
 .cursor-mark {
   position: absolute;

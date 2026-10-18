@@ -35,6 +35,35 @@ async function fetchTarball(path: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(gzipped).arrayBuffer());
 }
 
+/**
+ * The compiler WebAssembly. On a first visit, before the service worker has cached anything, the download is long,
+ * so its progress is posted as it arrives. Later visits get it from the service worker unchanged, which V8 keeps its
+ * compiled code beside: a response rebuilt to count its bytes would lose that.
+ */
+async function compilerModule(): Promise<Response | string> {
+  const cached = await caches.keys().then((names) => names.some((name) => name.startsWith('liveprint-')), () => false);
+  if (cached) return compilerWasm;
+  const response = await fetch(compilerWasm);
+  if (!response.ok || !response.body) return response;
+  // A compressed download's length counts compressed bytes, and the body yields them inflated.
+  const total = response.headers.has('Content-Encoding') ? null : Number(response.headers.get('Content-Length')) || null;
+  let loaded = 0;
+  let posted = 0;
+  const counted = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        loaded += chunk.byteLength;
+        if (performance.now() - posted > 100) {
+          posted = performance.now();
+          post({ kind: 'loading', loaded, total });
+        }
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+  return new Response(counted, { headers: { 'Content-Type': 'application/wasm' } });
+}
+
 /** withIncrementalServer frees the server when its callback settles, so this callback never does. */
 const openIncrementalServer = (compiler: TypstCompiler) =>
   new Promise<IncrementalServer>((resolve) => {
@@ -276,13 +305,14 @@ self.onmessage = ({ data }: MessageEvent<ToWorker>) => {
 };
 
 async function boot(): Promise<void> {
+  const wasm = compilerModule();
   const [, packages] = await Promise.all([
     fonts.load(FONT_FILES),
     Promise.all(Object.entries(PACKAGE_FILES).map(async ([spec, path]) => [spec, await fetchTarball(path)] as const)),
   ]);
   const bootFonts = fonts.bytes(FONT_FILES);
   const measured = measureFaces(bootFonts, self.fonts);
-  [compiler, raster] = await Promise.all([createCompiler({ wasm: compilerWasm, fonts: bootFonts, packages: new Map(packages) }), PageRaster.create()]);
+  [compiler, raster] = await Promise.all([createCompiler({ wasm: await wasm, fonts: bootFonts, packages: new Map(packages) }), PageRaster.create()]);
   addFaces([...FONT_FILES], await measured);
   linker = new Linker(raster);
   server = await openIncrementalServer(compiler);

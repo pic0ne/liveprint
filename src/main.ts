@@ -471,7 +471,11 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       last.bootMs = data.bootMs;
       drawOverlay();
       break;
+    case 'loading':
+      showLoading(data.loaded, data.total);
+      break;
     case 'pages': {
+      loading.remove();
       pages.show(data.sizes, data.bitmaps);
       if (data.final && data.rev === rev) {
         referenced = data.images;
@@ -536,6 +540,15 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       pages.showSpot(data.spot);
       break;
   }
+}
+
+const loading = $('loading');
+const mb = (bytes: number) => (bytes / 1e6).toFixed(1);
+/** The first visit's download of the typesetter, which a fast connection finishes before it is worth showing. */
+function showLoading(loaded: number, total: number | null): void {
+  if (!loading.isConnected || performance.now() < 400) return;
+  loading.textContent = `Downloading the typesetter, ${mb(loaded)}${total ? ` of ${mb(total)}` : ''} MB`;
+  loading.hidden = false;
 }
 
 function mathNotice(errors: string[]): string {
