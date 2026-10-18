@@ -61,8 +61,12 @@ async function connect(url) {
   return { send, listeners };
 }
 
-/** Starts `vite preview` of dist/ on a free port, at the path in LIVEPRINT_BASE (default `/`), as a host under a subpath would. */
+/**
+ * Starts `vite preview` of dist/ on a free port, at the path in LIVEPRINT_BASE (default `/`), as a host under a subpath
+ * would. With LIVEPRINT_URL set, uses the app served there instead, such as the deployed site.
+ */
 export async function preview() {
+  if (process.env.LIVEPRINT_URL) return { url: process.env.LIVEPRINT_URL, server: null };
   const port = await freePort();
   const base = process.env.LIVEPRINT_BASE ?? '/';
   const server = spawn('node_modules/.bin/vite', ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--base', base], { stdio: 'ignore' });

@@ -88,7 +88,7 @@ const MB = (bytes) => `${(bytes / 1e6).toFixed(2)} MB`;
 const row = (label, r) =>
   `  ${label.padEnd(6)} first page ${r.firstPage.toFixed(0).padStart(5)} ms  compiler ready ${r.bootMs.toFixed(0).padStart(5)} ms (worker clock)  wire ${MB(r.wire).padStart(9)}  ${r.requests} requests, ${r.fromServiceWorker} from the service worker`;
 
-console.log(`load, ${args.throttle ? `${args.throttle} Mbit/s, 40 ms latency` : 'loopback, no throttling'}`);
+console.log(`load ${url}, ${args.throttle ? `${args.throttle} Mbit/s, 40 ms latency` : 'no throttling'}`);
 for (let i = 0; i < Number(args.runs); i++) {
   await page.send('Page.navigate', { url: 'about:blank' });
   await page.send('Network.clearBrowserCache');
