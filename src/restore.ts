@@ -29,6 +29,18 @@ interface Kept {
   keptAt: number;
 }
 
+/**
+ * An image as kept: its bytes and type, not a Blob, since WebKit's private browsing hangs on putting a Blob into
+ * IndexedDB, and every write after it waits. Records from before this kept Blobs, which still read.
+ */
+interface KeptImage {
+  type: string;
+  bytes: ArrayBuffer;
+}
+
+const imageOf = (value: unknown): Blob | null =>
+  value instanceof Blob ? value : value && (value as KeptImage).bytes instanceof ArrayBuffer ? new Blob([(value as KeptImage).bytes], { type: (value as KeptImage).type }) : null;
+
 let db: Promise<IDBDatabase> | null = null;
 
 const done = <T>(request: IDBRequest<T>) =>
@@ -101,7 +113,7 @@ function parse(value: unknown, images: ReadonlyMap<ImagePath, Blob>): Doc | null
 async function read(id: DocId): Promise<Doc | null> {
   const transaction = (await open()).transaction([DOCS, IMAGES]);
   const images = transaction.objectStore(IMAGES);
-  const [record, keys, blobs] = await Promise.all([
+  const [record, keys, values] = await Promise.all([
     done(transaction.objectStore(DOCS).get(id)),
     done(images.getAllKeys(imagesOf(id))),
     done(images.getAll(imagesOf(id))),
@@ -109,7 +121,8 @@ async function read(id: DocId): Promise<Doc | null> {
   const kept = new Map<ImagePath, Blob>();
   keys.forEach((key, i) => {
     const path = (key as [DocId, string])[1];
-    if (typeof path === 'string' && blobs[i] instanceof Blob) kept.set(path as ImagePath, blobs[i]);
+    const image = imageOf(values[i]);
+    if (typeof path === 'string' && image) kept.set(path as ImagePath, image);
   });
   return parse(record, kept);
 }
@@ -209,9 +222,10 @@ export async function keepDoc(id: DocId, doc: Omit<Doc, 'images'>): Promise<void
 
 /** Replaces the record's kept images with these, in one transaction. */
 export async function keepImages(id: DocId, images: ReadonlyMap<ImagePath, Blob>): Promise<void> {
+  const kept = await Promise.all([...images].map(async ([path, blob]) => [path, { type: blob.type, bytes: await blob.arrayBuffer() }] as const));
   const transaction = (await open()).transaction(IMAGES, 'readwrite');
   const store = transaction.objectStore(IMAGES);
   store.delete(imagesOf(id));
-  for (const [path, blob] of images) store.put(blob, [id, path]);
+  for (const [path, image] of kept) store.put(image satisfies KeptImage, [id, path]);
   await completed(transaction);
 }
