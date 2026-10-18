@@ -207,6 +207,16 @@ describe('convert: front matter', () => {
     expect(convert('---\ndate: 2026-02-30\n---\n').frontMatter?.date).toBe('2026-02-30');
   });
 
+  test('a block scalar title over several lines, and Pandoc authors written as mappings', () => {
+    const { frontMatter, typst } = convert('---\ntitle: >-\n  A long\n  title\nauthor:\n  - name: Ada Byron\n    affiliation: X\n  - name: Doe\n---\n');
+    expect(frontMatter).toEqual({ title: 'A long title', authors: ['Ada Byron', 'Doe'], date: null });
+    expect(typst).toBe('#title-block(title: [A long title], authors: ([Ada Byron], [Doe],), date: none)\n');
+  });
+
+  test('two rules with nothing between are rules, not empty front matter', () => {
+    expect(convert('---\n---\n\nText').typst).toBe('#line(length: 100%)\n\n#line(length: 100%)\n\nText\n');
+  });
+
   test('a block list of authors, an ellipsis to close, and a comment after a value', () => {
     expect(convert('---\ntitle: Notes # draft\nauthor:\n  - A\n  - B\n...\n').frontMatter).toEqual({ title: 'Notes', authors: ['A', 'B'], date: null });
   });
@@ -240,11 +250,25 @@ test.each([
 
 describe('convert: footnotes', () => {
   test('a reference prints its definition as a footnote, and a later one repeats its number', () => {
-    expect(convert('A[^n] b[^N].\n\n[^n]: The *note*.').typst).toBe('A#footnote[The #emph[note];.]<liveprint-footnote-0> b#footnote(<liveprint-footnote-0>).\n');
+    expect(convert('A[^n] b[^N].\n\n[^n]: The *note*.').typst).toBe('A#footnote[The #emph[note];.]<liveprint-footnote-0> b#footnote(<liveprint-footnote-0>);.\n');
   });
 
   test('a definition holds paragraphs on indented lines, and ends at the next definition', () => {
     expect(convert('A[^1] B[^2]\n\n[^1]: One.\n\n    Two.\n[^2]: Three.').typst).toBe('A#footnote[One.\n\nTwo.]<liveprint-footnote-0> B#footnote[Three.]<liveprint-footnote-1>\n');
+  });
+
+  test('a reference ends its call, so a parenthesis or a dot after it stays text', () => {
+    expect(convert('A[^1](x) b[^1](y).c\n\n# H[^2](z)\n\n[^1]: N.\n[^2]: M.').typst).toBe(
+      'A#footnote[N.]<liveprint-footnote-0>(x) b#footnote(<liveprint-footnote-0>);(y).c\n\n#heading(level: 1)[H#footnote[M.];(z)]\n',
+    );
+  });
+
+  test('a definition or a [[toc]] indented as code stays code', () => {
+    expect(convert('A[^1]\n\n    [^1]: code\n    [[toc]]').typst).toBe('A\\[^1\\]\n\n#raw("[^1]: code\\n[[toc]]", block: true)\n');
+  });
+
+  test('a heading inside a footnote inside a heading keeps the footnote unlabelled', () => {
+    expect(convert('# H[^1]\n\n[^1]: # Inner').typst).toBe('#heading(level: 1)[H#footnote[#heading(level: 1)[Inner]];]\n');
   });
 
   test('a reference with no definition, or inside a footnote, shows as typed; an unused definition prints nothing', () => {

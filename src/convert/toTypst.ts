@@ -178,9 +178,10 @@ function link(url: string, body: string): string {
 
 function heading(level: number): Emit {
   return (node, doc) => {
+    const outer = doc.inHeading;
     doc.inHeading = true;
     const body = inline(node, doc);
-    doc.inHeading = false;
+    doc.inHeading = outer;
     return `#heading(level: ${level})[${body}]`;
   };
 }
@@ -378,16 +379,17 @@ const frontMatter: Emit = (node, doc) => {
     if (child.name === 'FrontMatterKey') fields.set((key = slice(child, doc)), []);
     else if (child.name === 'FrontMatterValue') fields.get(key)?.push(child);
   }
-  const [title] = fields.get('title') ?? [];
+  // A title over several lines, as a block scalar writes it, is one line of text.
+  const title = fields.get('title') ?? [];
   const authors = fields.get('author') ?? [];
   const [date] = fields.get('date') ?? [];
-  if (!title && authors.length === 0 && !date) return '';
+  if (title.length === 0 && authors.length === 0 && !date) return '';
   const text = (n: SyntaxNode) => slice(n, doc);
   const printed = (n: SyntaxNode) => `[${textBlock(doc, n.from, n.to)}]`;
   const calendar = date ? calendarDate(text(date)) : null;
-  doc.frontMatter = { title: title ? text(title) : null, authors: authors.map(text), date: calendar ?? (date ? text(date) : null) };
+  doc.frontMatter = { title: title.length > 0 ? title.map(text).join(' ') : null, authors: authors.map(text), date: calendar ?? (date ? text(date) : null) };
   const args = [
-    `title: ${title ? printed(title) : 'none'}`,
+    `title: ${title.length > 0 ? `[${title.map((n) => textBlock(doc, n.from, n.to)).join(' ')}]` : 'none'}`,
     `authors: (${authors.map((a) => `${printed(a)},`).join(' ')})`,
     `date: ${calendar ? datetime(calendar) : date ? printed(date) : 'none'}`,
   ];
@@ -417,11 +419,11 @@ const footnoteReference: Emit = (node, doc) => {
   const definition = doc.footnotes.get(label);
   if (!definition || doc.inFootnote) return escapeText(verbatim(doc, node.from, node.to));
   const number = doc.noted.get(label);
-  if (number !== undefined) return `#footnote(<liveprint-footnote-${number}>)`;
+  if (number !== undefined) return `#footnote(<liveprint-footnote-${number}>);`;
   doc.inFootnote = true;
   const body = aside(doc, () => blocks(contentOf(definition), doc));
   doc.inFootnote = false;
-  if (doc.inHeading) return `#footnote[${body}]`;
+  if (doc.inHeading) return `#footnote[${body}];`;
   doc.noted.set(label, doc.noted.size);
   return `#footnote[${body}]<liveprint-footnote-${doc.noted.size - 1}>`;
 };

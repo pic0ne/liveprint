@@ -95,11 +95,17 @@ const inputOf = (cx: BlockContext) => (cx as unknown as { input: { read(from: nu
 
 /** Front matter longer than this is not looked for. */
 const FRONT_MATTER_MAX = 64 * 1024;
-const FRONT_MATTER = /^---[ \t]*\n(?![ \t]*\n)((?:.*\n)*?)(?:---|\.\.\.)[ \t]*(?:\n|$)/;
+const FRONT_MATTER = /^---[ \t]*\n(?![ \t]*\n)((?:.*\n)+?)(?:---|\.\.\.)[ \t]*(?:\n|$)/;
 /** A line YAML could hold: blank, a comment, indented, a list item, or a key. Prose is none of these. */
 const YAML_LINE = /^(?:[ \t]*(?:#.*)?|[ \t].*|- .*|-|[\w-][\w -]*:(?:[ \t].*)?)$/;
 const KEY_LINE = /^([\w-][\w -]*?)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$/;
 const ITEM_LINE = /^[ \t]*- (.*?)[ \t]*$/;
+/** `|` or `>`: the value is on the indented lines below. */
+const BLOCK_SCALAR = /^[|>][+-]?$/;
+/** A list item that is a mapping, as Pandoc and Quarto write an author: `- name: Ada`. */
+const NAMED_ITEM = /^name:[ \t]+(.*)$/;
+/** An indented line that goes on with the value above, and is not a key of a nested mapping. */
+const CONTINUATION = /^[ \t]+(?![\w-]+:(?:[ \t]|$))(\S.*?)[ \t]*$/;
 
 /**
  * A YAML block that opens the document between `---` lines, as Pandoc and static site generators read it. A closing
@@ -115,14 +121,22 @@ function parseFrontMatter(cx: BlockContext, line: Line): boolean {
 
   const children: Element[] = [cx.elt('FrontMatterMark', 0, 3)];
   let at = line.text.length + 1;
+  // Whether the last key's value goes on in the indented lines below it.
+  let below = false;
   for (const text of body) {
     const key = KEY_LINE.exec(text);
     const item = key ? null : ITEM_LINE.exec(text);
+    const continuation = key || item ? null : CONTINUATION.exec(text);
     if (key) {
       children.push(cx.elt('FrontMatterKey', at, at + key[1]!.length));
-      if (key[2]) children.push(...values(cx, key[2], at + text.indexOf(key[2], key[1]!.length + 1)));
+      below = !key[2] || BLOCK_SCALAR.test(key[2]);
+      if (!below) children.push(...values(cx, key[2]!, at + text.indexOf(key[2]!, key[1]!.length + 1)));
     } else if (item?.[1]) {
-      children.push(...values(cx, item[1], at + text.lastIndexOf(item[1])));
+      const raw = NAMED_ITEM.exec(item[1])?.[1] ?? item[1];
+      children.push(...values(cx, raw, at + text.lastIndexOf(raw)));
+    } else if (below && continuation) {
+      const from = at + text.indexOf(continuation[1]!);
+      children.push(cx.elt('FrontMatterValue', from, from + continuation[1]!.length));
     }
     at += text.length + 1;
   }
@@ -164,6 +178,9 @@ const FrontMatterSyntax: MarkdownConfig = {
 
 const FOOTNOTE_LABEL = /^\[\^([^\]\s]+)\]/;
 /** The label of a footnote definition that `text` opens. A definition ends the paragraph before it. */
+/** Indented this far, a line is code. */
+const isCode = (line: Line) => line.indent >= line.baseIndent + 4;
+
 function isFootnoteDefinition(text: string): RegExpExecArray | null {
   const label = FOOTNOTE_LABEL.exec(text);
   return label && text[label[0].length] === ':' ? label : null;
@@ -193,7 +210,7 @@ const FootnoteSyntax: MarkdownConfig = {
     {
       name: 'FootnoteDefinition',
       parse(cx, line) {
-        const label = isFootnoteDefinition(line.text.slice(line.pos));
+        const label = isCode(line) ? null : isFootnoteDefinition(line.text.slice(line.pos));
         if (!label) return false;
         const from = cx.lineStart + line.pos;
         cx.startComposite('FootnoteDefinition', line.pos, FOOTNOTE_INDENT);
@@ -201,7 +218,7 @@ const FootnoteSyntax: MarkdownConfig = {
         line.moveBase(line.skipSpace(line.pos + label[0].length + 1));
         return null;
       },
-      endLeaf: (_cx, line) => isFootnoteDefinition(line.text.slice(line.pos)) !== null,
+      endLeaf: (_cx, line) => !isCode(line) && isFootnoteDefinition(line.text.slice(line.pos)) !== null,
       before: 'LinkReference',
     },
   ],
@@ -226,12 +243,12 @@ const TocSyntax: MarkdownConfig = {
     {
       name: 'TableOfContents',
       parse(cx, line) {
-        if (!TOC_LINE.test(line.text.slice(line.pos))) return false;
+        if (isCode(line) || !TOC_LINE.test(line.text.slice(line.pos))) return false;
         cx.addElement(cx.elt('TableOfContents', cx.lineStart + line.pos, cx.lineStart + line.text.length));
         cx.nextLine();
         return true;
       },
-      endLeaf: (_cx, line) => TOC_LINE.test(line.text.slice(line.pos)),
+      endLeaf: (_cx, line) => !isCode(line) && TOC_LINE.test(line.text.slice(line.pos)),
       before: 'LinkReference',
     },
   ],
