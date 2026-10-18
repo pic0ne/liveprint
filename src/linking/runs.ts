@@ -5,6 +5,8 @@ export interface Run {
   w: number;
   h: number;
   text: string;
+  /** The next run carries on its line right after it, so a space this one ends with is a space between words. */
+  continued?: true;
 }
 
 // The text layer sizes every run in a monospace fallback whose advance is DejaVu Sans Mono's 1233/2048 em, then
@@ -35,5 +37,10 @@ export function parseRuns(html: string): Run[] {
     const run = { x: property(style!, 'left'), y: property(style!, 'top'), w: [...text].length * LAYER_ADVANCE * h * scaleX, h, text };
     if (text !== '' && [run.x, run.y, run.w, run.h].every(Number.isFinite)) runs.push(run);
   }
-  return runs;
+  return runs.map((run, i) => {
+    const next = runs[i + 1];
+    const gap = next ? next.x - (run.x + run.w) : Infinity;
+    const carriesOn = next && Math.min(run.y + run.h, next.y + next.h) > Math.max(run.y, next.y) && gap >= -1 && gap < run.h / 2;
+    return carriesOn ? { ...run, continued: true } : run;
+  });
 }

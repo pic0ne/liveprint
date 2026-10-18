@@ -25,6 +25,10 @@ test('parseRuns reads every text run of a captured page in order, with its box i
   runs.forEach((run, i) => expect(run.x + run.w).toBeCloseTo(expected[i]!.right, 2));
 });
 
+test('parseRuns marks a run whose line carries on in the next run', () => {
+  expect(parseRuns(fixture).map((run) => !!run.continued)).toEqual([false, true, true, true, true, false, false, false, false, false, false]);
+});
+
 test('parseRuns decodes entities and skips spans without text or position', () => {
   const span = (style: string, text: string) => `<span class="typst-content-text" data-text-id="0" style="${style}">${text}</span>`;
   const at = 'font-size: calc(var(--data-text-height) * 10.00000); left: calc(var(--data-text-width) * 1.50000); top: calc(var(--data-text-height) * 2.00000)';

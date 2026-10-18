@@ -86,10 +86,10 @@ function strain(run: Run, natural: number, room: number): number {
 export function fitRuns(faces: Face[]): Fitter {
   return (run) => {
     const chars = [...run.text];
-    // A run's width ends at its last letter: the space after a line's last word takes none, and justification
-    // stretches only the spaces between words.
+    // A line's last run ends at its last letter: the space after the line's last word takes none, and justification
+    // stretches only the spaces between words. A run the line carries on from ends with such a space.
     let end = chars.length;
-    while (end > 0 && SPACE.test(chars[end - 1]!)) end--;
+    while (!run.continued && end > 0 && SPACE.test(chars[end - 1]!)) end--;
     const spaces = chars.slice(0, end).flatMap((c, i) => (SPACE.test(c) ? [i] : []));
     let widths: number[] = [];
     let face: string | null = null;

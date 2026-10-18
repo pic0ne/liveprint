@@ -139,6 +139,11 @@ describe('fitRuns', () => {
     expect(fitRuns([regular])({ text: 'ab c ', x: 0, y: 0, w: 20, h: 10 }).edges).toEqual([0, 5, 10, 15, 20, 20]);
   });
 
+  test('stretches the trailing space of a run its line carries on from, like the spaces before it', () => {
+    const regular = { path: 'fonts/regular.otf', advance: (t: string) => [...t].length * 0.5 };
+    expect(fitRuns([regular])({ text: 'ab c ', x: 0, y: 0, w: 31, h: 10, continued: true }).edges).toEqual([0, 5, 10, 18, 23, 31]);
+  });
+
   test('with no face to measure in, spreads the characters evenly in the monospace fallback', () => {
     expect(fitRuns([])({ text: 'ab', x: 4, y: 0, w: 10, h: 10 })).toEqual({ face: null, spacing: 0, scale: 10 / (2 * (1233 / 2048) * 10), edges: [4, 9, 14] });
   });
