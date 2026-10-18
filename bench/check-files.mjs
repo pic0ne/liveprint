@@ -23,7 +23,7 @@ function check(label, ok, detail) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${!ok && detail !== undefined ? `: ${J(detail)}` : ''}`);
 }
 
-const { url, browser, page, evaluate, close } = await launch();
+const { url, browser, page, evaluate, newTab, close } = await launch();
 await page.send('Page.enable');
 await page.send('DOM.enable');
 
@@ -285,6 +285,50 @@ await sleep(500);
 s = await state();
 const href = await evaluate('location.href');
 check('a dropped image is inserted, on the editor or the preview, and neither opens nor navigates away nor asks', href === url && s.name === 'dropped.md' && s.text.match(/!\[\]\(photo\.png\)/g)?.length === 2 && dialogs.length === 0, { href, s, dialogs });
+
+console.log('\nSeveral tabs');
+const textIn = (ev) => ev(`${view}.state.doc.toString()`);
+const setIn = (ev, text) => ev(`(() => { const v = ${view}; v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: ${J(text)} } }); })()`);
+const docId = (ev) => ev(`sessionStorage.getItem('liveprint.doc')`);
+async function openTab(beforeLoad) {
+  const tab = await newTab();
+  await tab.page.send('Page.enable');
+  if (beforeLoad) await tab.page.send('Page.addScriptToEvaluateOnNewDocument', { source: beforeLoad });
+  tab.page.listeners.add(({ method }) => method === 'Page.javascriptDialogOpening' && tab.page.send('Page.handleJavaScriptDialog', { accept: true }));
+  tab.reload = async (how = { url }) => {
+    await tab.page.send('Page.navigate', how);
+    await until('tab booted', () => tab.evaluate(`document.getElementById('file-name').textContent !== '' && !!document.querySelector('.cm-content')`));
+  };
+  await tab.reload();
+  return tab;
+}
+await setIn(evaluate, 'Tab A.');
+const b = await openTab();
+s = { text: await textIn(b.evaluate), name: await b.evaluate(`document.getElementById('file-name').textContent`) };
+check('a second tab starts empty, since the first holds the only document', s.text === '' && s.name === 'Untitled.md', s);
+await setIn(b.evaluate, 'Tab B.');
+await setIn(evaluate, 'Tab A again.');
+await sleep(400);
+await b.reload();
+check('reloading the second tab brings back its own text', (await textIn(b.evaluate)) === 'Tab B.', await textIn(b.evaluate));
+await load(() => page.send('Page.reload'));
+check('reloading the first tab brings back its own text, not the one written last', (await textIn(evaluate)) === 'Tab A again.', await textIn(evaluate));
+
+const first = await docId(evaluate);
+const c = await openTab(`sessionStorage.setItem('liveprint.doc', ${J(first)})`);
+s = { text: await textIn(c.evaluate), id: await docId(c.evaluate) };
+check('a duplicated tab shows a copy of the document under a record of its own', s.text === 'Tab A again.' && s.id && s.id !== first, s);
+await setIn(c.evaluate, 'Tab C.');
+await sleep(400);
+await load(() => page.send('Page.reload'));
+check('typing in the copy leaves the first tab alone', (await textIn(evaluate)) === 'Tab A again.', await textIn(evaluate));
+
+await b.close();
+await c.close();
+await sleep(300);
+const d = await openTab();
+check('a new tab, after the others closed, takes the newest document no open tab holds', (await textIn(d.evaluate)) === 'Tab C.', await textIn(d.evaluate));
+await d.close();
 
 if (args.shots) await screenshots(args.shots);
 

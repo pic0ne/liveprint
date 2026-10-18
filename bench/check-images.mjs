@@ -317,6 +317,29 @@ await load();
 s = await state();
 check('a version 1 record, from before images, restores', s.text === '# Before images\n' && s.name === 'old.md' && !s.edited && s.failure === '', s);
 
+await makeImage('image.png', 'magenta', 200, 100);
+const keptPng = (await imageBytes('image.png')).toString('base64');
+await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
+await until('a page of the origin without the app', () => evaluate(`location.pathname === '/manifest.webmanifest'`));
+await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
+await evaluate(`new Promise((resolve, reject) => {
+  const request = indexedDB.open('liveprint', 2);
+  request.onupgradeneeded = () => (request.result.createObjectStore('doc'), request.result.createObjectStore('images'));
+  request.onsuccess = () => {
+    const t = request.result.transaction(['doc', 'images'], 'readwrite');
+    const text = '# One document\\n\\n![](image.png)\\n';
+    t.objectStore('doc').put({ text, file: { name: 'v2.md', handle: null, saved: text, folder: null, savedImages: new Set(['image.png']) } }, 'last');
+    t.objectStore('images').put(new Blob([Uint8Array.from(atob(${J(keptPng)}), (c) => c.charCodeAt(0))], { type: 'image/png' }), 'image.png');
+    t.oncomplete = () => (request.result.close(), resolve());
+    t.onerror = () => reject(t.error);
+  };
+})`);
+await markFrames();
+await load();
+s = await state();
+first = await firstFrame();
+check('a version 2 record, with one document and its images, restores both', s.text === '# One document\n\n![](image.png)\n' && s.name === 'v2.md' && !s.edited && centredAt(first?.page, 'magenta', 200), { s, found: first?.page.found });
+
 console.log('\nSaving beside the file, with the File System Access API');
 await opfsWrite('notes', 'notes.md', '# Notes\n\n');
 await evaluate(`__picker.open = 'notes.md'`);

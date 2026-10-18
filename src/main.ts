@@ -8,7 +8,7 @@ import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
-import { keepDoc, keepImages, restoreDoc } from './restore';
+import { claimDoc, keepDoc, keepImages } from './restore';
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
 import { SettingsMenu } from './settingsMenu';
@@ -108,7 +108,7 @@ worker.onerror = (e) => {
 };
 
 // Read while the compiler boots, so that restoring the last document does not hold up the first compile.
-const restoring = restoreDoc().catch((error) => {
+const restoring = claimDoc().catch((error) => {
   last.fileFailure = `Could not restore the last document: ${message(error)}`;
   drawOverlay();
   return null;
@@ -160,7 +160,9 @@ function locateCursor(): void {
   });
 }
 
-const start: Doc = (await restoring) ?? untitled(sample);
+const claimed = await restoring;
+/** A first visit shows the sample. A tab opened while every kept document is open in another starts empty. */
+const start: Doc = claimed?.doc ?? untitled(claimed && !claimed.first ? '' : sample);
 performance.mark('liveprint:restored');
 let file = start.file;
 let images = start.images;
@@ -232,12 +234,13 @@ async function lookInFolder(): Promise<void> {
 let keeping = false;
 let keepAgain = false;
 function keep(): void {
+  if (!claimed) return;
   if (keeping) {
     keepAgain = true;
     return;
   }
   keeping = true;
-  keepDoc({ text: editor.state.doc.toString(), file })
+  keepDoc(claimed.id, { text: editor.state.doc.toString(), file })
     .catch((error) => {
       last.fileFailure = `Could not keep a copy of ${file.name} in this browser: ${message(error)}`;
       drawOverlay();
@@ -265,10 +268,12 @@ function changed(markdown: string): void {
 async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   images = next;
   showNotice();
-  keepImages(next).catch((error) => {
-    last.fileFailure = `Could not keep the images of ${file.name} in this browser: ${message(error)}`;
-    drawOverlay();
-  });
+  if (claimed) {
+    keepImages(claimed.id, next).catch((error) => {
+      last.fileFailure = `Could not keep the images of ${file.name} in this browser: ${message(error)}`;
+      drawOverlay();
+    });
+  }
   await workerImages.show(next);
 }
 

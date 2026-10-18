@@ -59,8 +59,8 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
 
   const browser = await connect((await json('/json/version')).webSocketDebuggerUrl);
   const page = await connect((await json('/json')).find((t) => t.type === 'page').webSocketDebuggerUrl);
-  const evaluate = async (expression) => {
-    const { result, exceptionDetails } = await page.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+  const evaluateIn = (target) => async (expression) => {
+    const { result, exceptionDetails } = await target.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
     if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
     return result.value;
   };
@@ -68,7 +68,13 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
     url: `http://127.0.0.1:${webPort}/`,
     browser,
     page,
-    evaluate,
+    evaluate: evaluateIn(page),
+    /** Opens another tab on about:blank and connects to it. */
+    async newTab() {
+      const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
+      const tab = await connect((await json('/json')).find((t) => t.id === targetId).webSocketDebuggerUrl);
+      return { page: tab, evaluate: evaluateIn(tab), close: () => browser.send('Target.closeTarget', { targetId }) };
+    },
     /** Stops `vite preview` and waits until nothing answers, so the page is left with no network for the app. */
     async stopServer() {
       server?.kill();
