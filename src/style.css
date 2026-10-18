@@ -473,6 +473,13 @@ button:focus-visible {
   transform-origin: 0 0;
 }
 
+.text-layer .text-end {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  user-select: none;
+}
+
 .text-layer ::selection {
   background: var(--page-selection);
 }
