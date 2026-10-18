@@ -524,32 +524,32 @@ function emit(node: SyntaxNode, doc: Doc): string {
   return emitter ? emitter(node, doc) : paragraphFallback(node, doc);
 }
 
-/** Every footnote definition by its folded label; the first of two with one label wins. */
-function collectFootnotes(root: SyntaxNode, src: string): Map<string, SyntaxNode> {
+/** The blocks that hold other blocks, which is where link reference and footnote definitions can be. */
+const CONTAINERS = new Set(['Document', 'Blockquote', 'BulletList', 'OrderedList', 'ListItem', 'FootnoteDefinition']);
+
+/**
+ * Link reference definitions by their normalised label, and footnote definitions by their folded label. The first of
+ * two with one label wins. One walk, which never enters a leaf block.
+ */
+function collectDefinitions(root: SyntaxNode, src: string): { refs: Map<string, Ref>; footnotes: Map<string, SyntaxNode> } {
+  const refs = new Map<string, Ref>();
   const footnotes = new Map<string, SyntaxNode>();
   root.cursor().iterate((n) => {
-    if (n.name !== 'FootnoteDefinition') return;
-    const label = FOOTNOTE_LABEL.exec(src.slice(n.from, n.to))![1]!.toLowerCase();
-    if (!footnotes.has(label)) footnotes.set(label, n.node);
+    if (n.name === 'LinkReference') {
+      const label = n.node.getChild('LinkLabel');
+      const url = n.node.getChild('URL');
+      if (label && url) {
+        const key = normalizeLabel(src.slice(label.from, label.to));
+        const text = src.slice(url.from, url.to);
+        if (!refs.has(key)) refs.set(key, { url: text.replace(/^<|>$/g, ''), from: url.from + (text.startsWith('<') ? 1 : 0) });
+      }
+    } else if (n.name === 'FootnoteDefinition') {
+      const label = FOOTNOTE_LABEL.exec(src.slice(n.from, n.to))![1]!.toLowerCase();
+      if (!footnotes.has(label)) footnotes.set(label, n.node);
+    }
+    return CONTAINERS.has(n.name);
   });
-  return footnotes;
-}
-
-function collectRefs(root: SyntaxNode, src: string): Map<string, Ref> {
-  const refs = new Map<string, Ref>();
-  const defs: SyntaxNode[] = [];
-  root.cursor().iterate((n) => {
-    if (n.name === 'LinkReference') defs.push(n.node);
-  });
-  for (const def of defs) {
-    const label = def.getChild('LinkLabel');
-    const url = def.getChild('URL');
-    if (!label || !url) continue;
-    const key = normalizeLabel(src.slice(label.from, label.to));
-    const text = src.slice(url.from, url.to);
-    if (!refs.has(key)) refs.set(key, { url: text.replace(/^<|>$/g, ''), from: url.from + (text.startsWith('<') ? 1 : 0) });
-  }
-  return refs;
+  return { refs, footnotes };
 }
 
 /**
@@ -565,7 +565,8 @@ export function convert(
 ): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null, footnotes: collectFootnotes(root, src), noted: new Map(), inFootnote: false, inHeading: false };
+  const { refs, footnotes } = collectDefinitions(root, src);
+  const doc: Doc = { src, refs, pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null, footnotes, noted: new Map(), inFootnote: false, inHeading: false };
   const typst = `${emit(root, doc)}\n`;
   return { typst, pieces: doc.pieces, images: [...doc.images], shownImages: doc.shownImages, typedMath: doc.typedMath, frontMatter: doc.frontMatter };
 }
