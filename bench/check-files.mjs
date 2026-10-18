@@ -198,6 +198,53 @@ await until('discarded and opened', async () => (await state()).name === 'notes.
 s = await state();
 check('accepting opens the file', !s.edited && s.text === (await opfsRead('notes.md')), s);
 
+console.log('\nA file another program changes');
+const disk = () => evaluate(`!document.getElementById('disk-notice').hidden`);
+const comeBack = () => evaluate(`window.dispatchEvent(new Event('focus'))`);
+const opened = s.text;
+await opfsWrite('notes.md', `${opened}Written elsewhere.\n`);
+await comeBack();
+await until('clean document reloaded', async () => (await state()).text === `${opened}Written elsewhere.\n`).catch(() => null);
+s = await state();
+check('a clean document takes the new text when the tab comes back, and stays clean', s.text === `${opened}Written elsewhere.\n` && !s.edited && !(await disk()), s);
+await key('z', { ctrl: true });
+s = await state();
+check('undo brings back the text from before, now Edited', s.text === opened && s.edited, s);
+await key('z', { ctrl: true, shift: true });
+check('redo is clean again', !(await state()).edited);
+
+await cursorToEnd();
+await type('Mine.');
+await opfsWrite('notes.md', `${opened}Theirs.\n`);
+await comeBack();
+await until('notice shown', disk).catch(() => null);
+s = await state();
+check('an edited document keeps its text and says the file changed on disk', s.text === `${opened}Written elsewhere.\nMine.` && s.edited && (await disk()), s);
+dialogs.length = 0;
+answers.push(false);
+await key('s', { ctrl: true });
+await until('overwrite asked', async () => dialogs.length === 1);
+await sleep(300);
+check('Save asks before overwriting the change, naming the file', dialogs[0]?.type === 'confirm' && dialogs[0].message === 'notes.md has changed on disk since it was opened. Overwrite it with the text here?', dialogs);
+check('declining leaves the file on disk alone, the document Edited and the notice up', (await opfsRead('notes.md')) === `${opened}Theirs.\n` && (await state()).edited && (await disk()));
+await evaluate(`document.getElementById('reload').click()`);
+await until('reloaded', async () => !(await state()).edited);
+s = await state();
+check('Reload takes the text on disk and clears the notice', s.text === `${opened}Theirs.\n` && !(await disk()), s);
+await key('z', { ctrl: true });
+check('undo after Reload brings back the unsaved text', (await state()).text === `${opened}Written elsewhere.\nMine.`);
+
+await opfsWrite('notes.md', `${opened}Theirs again.\n`);
+dialogs.length = 0;
+answers.push(true);
+await key('s', { ctrl: true });
+await until('saved over the change', async () => !(await state()).edited);
+s = await state();
+check('accepting overwrites the file with the text here', dialogs.length === 1 && (await opfsRead('notes.md')) === s.text && s.text.endsWith('Mine.') && !(await disk()), { s, dialogs });
+await opfsWrite('notes.md', opened);
+await comeBack();
+await until('back to the opened text', async () => (await state()).text === opened);
+
 await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 200, y: 200, button: 'left', clickCount: 1 });
 await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 200, button: 'left', clickCount: 1 });
 dialogs.length = 0;

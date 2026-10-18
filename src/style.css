@@ -116,8 +116,12 @@ body {
   display: none;
 }
 
-/* Says what Edited cannot: images the preview lacks, or ones not beside the saved file. No louder than Edited. */
-.image-notice {
+/*
+ * Say what Edited cannot: images the preview lacks, or ones not beside the saved file, and a file another program
+ * changed. No louder than Edited.
+ */
+.image-notice,
+.disk-notice {
   display: flex;
   flex: none;
   align-items: baseline;
@@ -126,7 +130,8 @@ body {
   white-space: nowrap;
 }
 
-.image-notice[hidden] {
+.image-notice[hidden],
+.disk-notice[hidden] {
   display: none;
 }
 
@@ -459,7 +464,8 @@ button:focus-visible {
     max-width: max-content;
   }
 
-  .image-notice {
+  .image-notice,
+  .disk-notice {
     flex-basis: 100%;
   }
 

@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory } from '@codemirror/commands';
 import { commonmarkLanguage, markdown } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
@@ -55,6 +55,20 @@ export function jumpTo(view: EditorView, offset: number): void {
   view.focus();
   clearTimeout(unmark);
   unmark = window.setTimeout(() => view.dispatch({ effects: markJump.of(null) }), 600);
+}
+
+/**
+ * Makes the document `text` with one change that spans only what differs, so the cursor and the scroll stay where
+ * they were outside it, and one undo brings the old text back, never joined with typing just before.
+ */
+export function replaceText(view: EditorView, text: string): void {
+  const old = view.state.doc.toString();
+  let from = 0;
+  while (from < old.length && from < text.length && old[from] === text[from]) from++;
+  let end = 0;
+  while (end < old.length - from && end < text.length - from && old[old.length - 1 - end] === text[text.length - 1 - end]) end++;
+  if (from === old.length && from === text.length) return;
+  view.dispatch({ changes: { from, to: old.length - end, insert: text.slice(from, text.length - end) }, annotations: isolateHistory.of('full') });
 }
 
 /**

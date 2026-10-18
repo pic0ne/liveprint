@@ -1,8 +1,8 @@
 import { convert } from './convert/toTypst';
 import { type Doc, documentTitle, imageNotice, isEdited, noticeText, pdfName, untitled } from './doc';
 import { addImages, WorkerImages } from './docImages';
-import { createEditor, jumpTo } from './editor';
-import { chooseFolder, download, droppedFile, imagesAllowed, openFile, saveFile } from './files';
+import { createEditor, jumpTo, replaceText } from './editor';
+import { chooseFolder, diskText, download, droppedFile, imagesAllowed, openFile, saveFile, watchFile } from './files';
 import { IMAGE_TYPE_NAMES, IMAGE_TYPES, type ImagePath } from './images';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
@@ -274,6 +274,8 @@ async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
 
 async function openDoc(doc: Doc): Promise<void> {
   file = doc.file;
+  showDiskChange(false);
+  watchDisk();
   referenced = [];
   looked = new Set();
   await setImages(doc.images);
@@ -334,13 +336,60 @@ const open = () =>
 const save = (as: boolean) =>
   fileAction(`save ${file.name}`, async () => {
     const text = editor.state.doc.toString();
-    const saved = await saveFile(text, file, images, imagesIn(text), as);
-    if (!saved) return;
+    const overwrite = () => confirm(`${file.name} has changed on disk since it was opened. Overwrite it with the text here?`);
+    const saved = await saveFile(text, file, images, imagesIn(text), as, overwrite);
+    if (!saved) return void checkDisk();
     file = saved;
+    showDiskChange(false);
+    watchDisk();
     showFile();
     showNotice();
     keep();
   });
+
+const diskNotice = $('disk-notice');
+const showDiskChange = (changed: boolean) => (diskNotice.hidden = !changed);
+
+/**
+ * Compares the file on disk with the text last opened or saved there. When another program changed it, a clean
+ * document takes the new text, as one change the reader can undo, and an edited one says so in the bar, where Reload
+ * takes it. Asked when the tab comes back into view and when the browser reports a change to the file.
+ */
+async function checkDisk(): Promise<void> {
+  const checked = file;
+  const disk = await diskText(checked).catch(() => null);
+  if (file !== checked || busy || disk === null) return;
+  const changed = disk !== checked.saved;
+  if (changed && !isEdited(editor.state.doc.toString(), checked)) reloadFrom(disk);
+  else showDiskChange(changed);
+}
+
+function reloadFrom(text: string): void {
+  file = { ...file, saved: text };
+  showDiskChange(false);
+  replaceText(editor, text);
+  showFile();
+  keep();
+}
+
+const reload = () =>
+  fileAction(`reload ${file.name}`, async () => {
+    const disk = await diskText(file);
+    if (disk === null) throw new Error('liveprint cannot read it');
+    reloadFrom(disk);
+  });
+
+let unwatch = () => {};
+let watched: FileSystemFileHandle | null = null;
+function watchDisk(): void {
+  if (file.handle === watched) return;
+  unwatch();
+  watched = file.handle;
+  unwatch = watched ? watchFile(watched, () => void checkDisk()) : () => {};
+}
+watchDisk();
+window.addEventListener('focus', () => void checkDisk());
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void checkDisk());
 
 const chooseImageFolder = () =>
   fileAction('read the folder', async () => {
@@ -387,6 +436,7 @@ $('open').title = `Open (${mac ? '⌘O' : 'Ctrl+O'})`;
 $('save').title = `Save (${mac ? '⌘S' : 'Ctrl+S'}). Shift-click or press ${mac ? '⇧⌘S' : 'Shift+Ctrl+S'} to save as`;
 $('open').addEventListener('click', () => void open());
 $('choose-folder').addEventListener('click', () => void chooseImageFolder());
+$('reload').addEventListener('click', () => void reload());
 $('save').addEventListener('click', (e) => void save(e.shiftKey));
 
 $('pages').addEventListener('click', (e) => {

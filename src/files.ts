@@ -21,6 +21,8 @@ declare global {
   interface DataTransferItem {
     getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
   }
+  // Chromium 129 and later.
+  var FileSystemObserver: { new (callback: () => void): { observe(handle: FileSystemHandle): Promise<void>; disconnect(): void } } | undefined;
 }
 
 const MARKDOWN: FilePickerType[] = [{ description: 'Markdown', accept: { 'text/markdown': ['.md', '.markdown'] } }];
@@ -149,10 +151,30 @@ async function folderToWrite(file: DocFile, unsaved: readonly ImagePath[]): Prom
   return window.showDirectoryPicker ? pickFolder(file) : null;
 }
 
+/** The file's text on disk, or null when liveprint cannot read it without asking: no handle, no grant yet, or no file. */
+export async function diskText(file: DocFile): Promise<string | null> {
+  if (!file.handle || !(await allowed(file.handle, 'read'))) return null;
+  try {
+    return await (await file.handle.getFile()).text();
+  } catch (error) {
+    if (notFound(error)) return null;
+    throw error;
+  }
+}
+
+/** Calls `changed` when the browser reports a change to the file, where it can. Returns how to stop. */
+export function watchFile(handle: FileSystemFileHandle, changed: () => void): () => void {
+  if (typeof FileSystemObserver === 'undefined') return () => {};
+  const observer = new FileSystemObserver(changed);
+  observer.observe(handle).catch(() => {});
+  return () => observer.disconnect();
+}
+
 /**
- * Writes `text` back to the file it came from, and the referenced images not yet beside it into its folder. Without a
- * writable handle, or with `as`, asks where to save it first; without the API, downloads it and those images under
- * their names. Returns where it now lives, or null when the user cancels.
+ * Writes `text` back to the file it came from, and the referenced images not yet beside it into its folder. If the
+ * file changed on disk since it was opened or saved, writes only when `overwrite` agrees. Without a writable handle,
+ * or with `as`, asks where to save it first; without the API, downloads it and those images under their names.
+ * Returns where it now lives, or null when the user cancels.
  */
 export async function saveFile(
   text: string,
@@ -160,11 +182,14 @@ export async function saveFile(
   images: ReadonlyMap<ImagePath, Blob>,
   referenced: readonly ImagePath[],
   as: boolean,
+  overwrite: () => boolean,
 ): Promise<DocFile | null> {
   const unsaved = unsavedImages(file, images, referenced);
   if (!as && file.handle) {
     const folder = await folderToWrite(file, unsaved);
     if (await mayWrite(file.handle)) {
+      const disk = await diskText(file);
+      if (disk !== null && disk !== file.saved && !overwrite()) return null;
       await writeFile(file.handle, text);
       if (folder) await writeImages(folder, unsaved, images);
       return withSaved({ ...file, saved: text, folder: folder ?? file.folder }, folder ? unsaved : []);
