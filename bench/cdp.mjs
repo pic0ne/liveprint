@@ -42,7 +42,8 @@ async function connect(url) {
     if (waiting.has(m.id)) waiting.get(m.id)(m);
     else for (const listener of listeners) listener(m);
   };
-  ws.onclose = () => waiting.size > 0 && stuck('Chrome closed the DevTools connection with commands unanswered.');
+  // Later than Chrome's exit event, which says why it went, when Chrome exited.
+  ws.onclose = () => waiting.size > 0 && setTimeout(() => stuck('Chrome closed the DevTools connection with commands unanswered.'), 2000);
   /** `sessionId` addresses a target attached with `flatten: true`, such as a page's worker. */
   const send = (method, params = {}, sessionId) =>
     new Promise((resolve, reject) => {
@@ -81,7 +82,11 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
   const web = serve ? await preview() : null;
   const server = web?.server ?? null;
   const profile = mkdtempSync(join(tmpdir(), 'liveprint-chrome-'));
-  const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', `--window-size=${width},${height}`, 'about:blank'], { stdio: 'ignore' });
+  const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', `--window-size=${width},${height}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let chromeLog = '';
+  chrome.stderr.on('data', (chunk) => (chromeLog = (chromeLog + chunk).slice(-8000)));
+  let closing = false;
+  chrome.on('exit', (code, signal) => closing || stuck(`Chrome exited (${signal ?? `code ${code}`}) before the script was done. The end of what it printed:\n${chromeLog}`));
   const chromeExited = once(chrome, 'exit');
   process.on('exit', () => [chrome, server].forEach((child) => child?.kill()));
 
@@ -113,6 +118,7 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
       await until('vite preview stopped', () => fetch(web.url).then(() => false, () => true));
     },
     async close() {
+      closing = true;
       chrome.kill();
       server?.kill();
       await chromeExited;
