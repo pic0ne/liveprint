@@ -5,7 +5,7 @@
 // in Paper, whose face Chrome cannot load, where only the selected text is checked). A word's box is found in the
 // page's pixels, as the ink between the gaps that separate its run's words, so neither the source index nor its
 // character measuring decides what counts as correct. A formula mitex rejects is added to the first paragraph, and
-// a word of its LaTeX, shown as typed, is sampled too, as are words of a front matter title and author, which the running header repeats from page 2 on. Then (d) a click on each symbol of a formula puts the cursor
+// a word of its LaTeX, shown as typed, is sampled too, as are words of a front matter title and author, which the running header repeats from page 2 on, and of a footnote; a table of contents entry is clicked. Then (d) a click on each symbol of a formula puts the cursor
 // in that symbol's LaTeX, and (e) a drag across two lines selects and copies the text between.
 // node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
 import { parseArgs } from 'node:util';
@@ -53,11 +53,17 @@ const TYPED = '$\\foo zeugma$';
 const FORMULA = '$a \\quad \\beta \\quad \\sin \\quad 7 \\quad \\mathbb{R}$';
 const SYMBOLS = ['a', '\\beta', '\\sin', '7', '\\mathbb{R}'];
 // Front matter with words found nowhere else, so its title and authors are sampled.
-const FRONT = '---\ntitle: Quillwort almanac\nauthor: [Ottoline Vexby, Barnaby Quist]\ndate: 2026-10-18\n---\n\n';
+const FRONT = '---\ntitle: Quillwort almanac\nauthor: [Ottoline Vexby, Barnaby Quist]\ndate: 2026-10-18\n---\n\n[[toc]]\n\n';
+// A footnote, printed at the foot of page 1 and defined at the end, with words found nowhere else.
+const FOOTNOTE = '\n\n[^lp]: Zymurgic marginalia beneath the measure.\n';
 await evaluate(`(() => {
   __shown = null;
   const v = ${view};
-  v.dispatch({ changes: [{ from: 0, insert: ${JSON.stringify(FRONT)} }, { from: v.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.\n\n${FORMULA}`)} }] });
+  v.dispatch({ changes: [
+    { from: 0, insert: ${JSON.stringify(FRONT)} },
+    { from: v.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.[^lp]\n\n${FORMULA}`)} },
+    { from: v.state.doc.length, insert: ${JSON.stringify(FOOTNOTE)} },
+  ] });
 })()`);
 await until('the typed formula drawn', () => evaluate('__shown?.final'));
 await sleep(1000);
@@ -135,6 +141,7 @@ function kindAt(offset) {
   const lineStart = markdown.lastIndexOf('\n', offset - 1) + 1;
   const line = markdown.slice(lineStart, markdown.indexOf('\n', offset) >>> 0);
   if (offset < FRONT.length) return /^\w+/.exec(line)[0];
+  if (line.startsWith('[^lp]:')) return 'footnote';
   if (fences.some(([a, b]) => offset > a && offset < b)) return 'code';
   if (line.startsWith('|')) return 'table cell';
   if (/^\s*([-*+]|\d+\.)\s/.test(line)) return 'list item';
@@ -180,7 +187,7 @@ for (const m of markdown.matchAll(/\$[^$\n]+\$[\s,.;:]*([\p{L}\p{N}]+)((?:\s+[\p
 }
 
 const picked = new Set();
-const KINDS = ['title', 'author', 'table cell', 'code', 'list item', 'after math', 'typed math'];
+const KINDS = ['title', 'author', 'footnote', 'table cell', 'code', 'list item', 'after math', 'typed math'];
 for (const kind of KINDS) {
   const found = candidates.find((c) => c.kind === kind);
   if (found) picked.add(found);
@@ -365,6 +372,30 @@ const timing = await evaluate(`new Promise((resolve) => {
   __worker.postMessage({ kind: 'edit', rev: 1e6, markdown: ${JSON.stringify(edited)} });
   __worker.postMessage({ kind: 'locate', id: 1e9 + 1, offset: 5000 });
 })`);
+// A click on an entry of the table of contents puts the cursor in its heading, and a cursor in the heading marks the
+// heading where it prints, not the entry.
+const LEADING = markdown.indexOf('## Leading') + 3;
+const entry = pages[0].runs.find((r) => /^Leading\b/.test(r.text));
+let contents = { ok: false, detail: 'no entry for Leading on page 1' };
+if (entry) {
+  await evaluate(`document.getElementById('pages').scrollTop = 0`);
+  await sleep(250);
+  const rect = await canvasRect(0);
+  const before = await head();
+  const t0 = performance.now();
+  const at = { x: rect.left + ((entry.x + 3) / pages[0].width) * rect.width, y: rect.top + ((entry.y + entry.h / 2) / pages[0].height) * rect.height };
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
+  const { h } = await until('cursor moved', async () => {
+    const h = await head();
+    return h !== before || performance.now() - t0 > 2000 ? { h } : null;
+  });
+  const { data: { spot } } = await ask({ kind: 'locate', id: 1e9 + 2, offset: LEADING + 2 }, 'located');
+  const headingPage = pages.findIndex((p, i) => i > 0 && p.runs.some((r) => /^(\d\s*)?Leading$/.test(r.text.trim())));
+  contents = { ok: h >= LEADING && h <= LEADING + 7 && spot?.page === headingPage && headingPage > 0, detail: { clicked: markdown.slice(h - 4, h + 4), marked: spot?.page, headingPage } };
+  await evaluate(`(() => { const v = ${view}; v.dispatch({ selection: { anchor: 0 }, scrollIntoView: true }); })()`);
+  await sleep(200);
+}
+
 // The editor sets the front matter's marks and keys in the muted colour of other Markdown syntax, and its values in ink.
 const colours = await evaluate(`(() => {
   const colour = (text, exact = true) => {
@@ -398,6 +429,7 @@ const sorted = sourcedMs.sort((a, b) => a - b);
 console.log(`\n${results.length} words on ${new Set(results.map((r) => r.page)).size} of ${pages.length} pages, from ${candidates.length} unambiguous candidates; ${failed.length} failed`);
 console.log(`clicks on the symbols of ${FORMULA}: ${formulaOk ? 'pass' : 'FAIL'} ${formulaResults.map((r) => `${r.symbol} ${r.ok ? 'ok' : `at ${JSON.stringify(r.at)}`}`).join(', ') || 'no formula line found'}`);
 console.log(`drag from ${JSON.stringify(from?.text)} to ${JSON.stringify(to?.text)} and copy: ${dragged.ok ? 'pass' : 'FAIL'} ${JSON.stringify(dragged.text)}`);
+console.log(`table of contents: ${contents.ok ? 'pass' : 'FAIL'} ${JSON.stringify(contents.detail)}`);
 console.log(`running header: ${headerOk ? 'pass' : 'FAIL'} ${JSON.stringify(headers.slice(0, 3))}`);
 console.log(`front matter in the editor: ${highlightOk ? 'pass' : 'FAIL'} ${JSON.stringify(colours)}`);
 console.log(`click to source offset: median ${sorted[sorted.length >> 1].toFixed(1)} ms, max ${sorted[sorted.length - 1].toFixed(1)} ms`);
@@ -405,4 +437,4 @@ console.log(`edit then locate: visible pages after ${timing.drawn.toFixed(1)} ms
 const kinds = new Set(results.map((r) => r.kind));
 const missing = KINDS.filter((k) => !kinds.has(k));
 if (missing.length > 0) console.log(`no unambiguous word found of kind: ${missing.join(', ')}`);
-process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk || !highlightOk || !headerOk ? 1 : 0);
+process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk || !highlightOk || !headerOk || !contents.ok ? 1 : 0);
