@@ -1,3 +1,4 @@
+import { type Input, type Parser, TreeFragment } from '@lezer/common';
 import { tags } from '@lezer/highlight';
 import { GFM, parser as commonmark } from '@lezer/markdown';
 import type { BlockContext, Element, Line, MarkdownConfig, MarkdownExtension } from '@lezer/markdown';
@@ -166,7 +167,38 @@ function values(cx: BlockContext, raw: string, from: number): Element[] {
   });
 }
 
+/**
+ * How far the text that decides whether a document opens with front matter reaches: to the end of its closing line
+ * or of the first line YAML could not hold. 0 when the document does not open with `---`.
+ */
+function frontMatterReach(input: Input): number {
+  const head = input.read(0, Math.min(input.length, FRONT_MATTER_MAX));
+  if (!head.startsWith('---')) return 0;
+  let at = head.indexOf('\n') + 1;
+  if (at === 0) return head.length;
+  while (at < head.length) {
+    const end = head.indexOf('\n', at);
+    const text = head.slice(at, end < 0 ? head.length : end);
+    if (end < 0 || /^(?:---|\.\.\.)[ \t]*$/.test(text) || !YAML_LINE.test(text)) return end < 0 ? head.length : end + 1;
+    at = end + 1;
+  }
+  return head.length;
+}
+
+/**
+ * The editor parses again only what an edit touched, so it kept the rule a first `---` was parsed as while the closing
+ * line was typed far below. The front matter's first line depends on all of that text, so no tree is reused over it.
+ */
+function reparseFrontMatter(inner: ReturnType<Parser['createParse']>, input: Input, fragments: readonly TreeFragment[], ranges: readonly { from: number; to: number }[]) {
+  const reach = frontMatterReach(input);
+  const parser = (inner as unknown as { parser?: Parser }).parser;
+  if (reach === 0 || !parser || !fragments.some((f) => f.from < reach)) return inner;
+  const kept = fragments.flatMap((f) => (f.to <= reach ? [] : f.from >= reach ? [f] : [new TreeFragment(reach, f.to, f.tree, f.offset, true, f.openEnd)]));
+  return parser.createParse(input, kept, ranges);
+}
+
 const FrontMatterSyntax: MarkdownConfig = {
+  wrap: reparseFrontMatter,
   defineNodes: [
     { name: 'FrontMatter', block: true },
     { name: 'FrontMatterMark', style: tags.processingInstruction },
