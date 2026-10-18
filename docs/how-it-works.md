@@ -111,7 +111,7 @@ The header has no setting of its own. A document has one when its front matter g
 
 A `[[toc]]` line prints a table of contents of the headings to level 3, with their page numbers, where the line is. A line rather than a front matter key lets the writer place it, after an introduction for example, and a click on the **Contents** title lands on that line.
 
-Footnote text and contents entries link both ways, as the linking section describes. A footnote first referred to in a heading prints again at its next reference: the table of contents prints the heading a second time, and Typst lets a footnote's label occur only once.
+Footnote text and contents entries link both ways, as the linking section describes. A footnote first referred to in a heading prints again at its next reference: the table of contents prints the heading a second time, and Typst lets a footnote's label occur only once. For the same reason, in a document with a table of contents, an image in a heading does not link.
 
 ## Files
 

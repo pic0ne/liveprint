@@ -81,6 +81,8 @@ interface Doc {
   inFootnote: boolean;
   /** Whether a heading is being printed, which the table of contents prints again. */
   inHeading: boolean;
+  /** Whether the document has a table of contents. */
+  hasContents: boolean;
 }
 
 type Emit = (node: SyntaxNode, doc: Doc) => string;
@@ -328,8 +330,11 @@ function plain(node: SyntaxNode, doc: Doc, from: number, to: number): string {
 function image(node: SyntaxNode, doc: Doc, path: ImagePath): string {
   const [open, close] = named(node, 'LinkMark');
   const alt = softBreaks(plain(node, doc, open?.to ?? node.from, close?.from ?? node.to)).trim();
+  const typst = `image(${str(`/images/${path}`)}, alt: ${str(alt)})`;
+  // The table of contents prints a heading again, and its image's marks with it, which would no longer pair up.
+  if (doc.inHeading && doc.hasContents) return typst;
   doc.shownImages.push({ from: node.from, to: node.to, path });
-  return `linked-image(image(${str(`/images/${path}`)}, alt: ${str(alt)}))`;
+  return `linked-image(${typst})`;
 }
 
 const PLACEHOLDER = 'block(stroke: (paint: luma(185), thickness: 0.5pt, dash: "dashed"), inset: 10pt, text(fill: luma(115))';
@@ -530,13 +535,15 @@ function emit(node: SyntaxNode, doc: Doc): string {
 const CONTAINERS = new Set(['Document', 'Blockquote', 'BulletList', 'OrderedList', 'ListItem', 'FootnoteDefinition']);
 
 /**
- * Link reference definitions by their normalised label, and footnote definitions by their folded label. The first of
- * two with one label wins. One walk, which never enters a leaf block.
+ * Link reference definitions by their normalised label, footnote definitions by their folded label, and whether there
+ * is a table of contents. The first of two definitions with one label wins. One walk, which never enters a leaf block.
  */
-function collectDefinitions(root: SyntaxNode, src: string): { refs: Map<string, Ref>; footnotes: Map<string, SyntaxNode> } {
+function collectDefinitions(root: SyntaxNode, src: string): { refs: Map<string, Ref>; footnotes: Map<string, SyntaxNode>; hasContents: boolean } {
   const refs = new Map<string, Ref>();
   const footnotes = new Map<string, SyntaxNode>();
+  let hasContents = false;
   root.cursor().iterate((n) => {
+    if (n.name === 'TableOfContents') hasContents = true;
     if (n.name === 'LinkReference') {
       const label = n.node.getChild('LinkLabel');
       const url = n.node.getChild('URL');
@@ -551,7 +558,7 @@ function collectDefinitions(root: SyntaxNode, src: string): { refs: Map<string, 
     }
     return CONTAINERS.has(n.name);
   });
-  return { refs, footnotes };
+  return { refs, footnotes, hasContents };
 }
 
 /**
@@ -567,8 +574,8 @@ export function convert(
 ): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const { refs, footnotes } = collectDefinitions(root, src);
-  const doc: Doc = { src, refs, pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null, footnotes, noted: new Map(), inFootnote: false, inHeading: false };
+  const { refs, footnotes, hasContents } = collectDefinitions(root, src);
+  const doc: Doc = { src, refs, pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null, footnotes, noted: new Map(), inFootnote: false, inHeading: false, hasContents };
   const typst = `${emit(root, doc)}\n`;
   return { typst, pieces: doc.pieces, images: [...doc.images], shownImages: doc.shownImages, typedMath: doc.typedMath, frontMatter: doc.frontMatter };
 }

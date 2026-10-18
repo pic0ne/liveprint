@@ -136,4 +136,16 @@ describe('image marks', () => {
       { from: 61, to: 74, path: 'wide.png', page: 1, x: 70.9, y: 70.9, w: 453.5, h: 453.5 },
     ]);
   });
+
+  test('pair up with a table of contents, which prints a heading with an image again', async () => {
+    compiler.mapShadow('/images/small.png', repoFile('public/icon-192.png'));
+    const { typst, shownImages } = convert('[[toc]]\n\n# Logo ![l](small.png)\n\nText ![](small.png)', new Set(['small.png'] as ImagePath[]));
+    compiler.addSource(MAIN_PATH, mainSource(prelude, typst));
+    const marks = await compiler.runWithWorld({ mainFilePath: MAIN_PATH }, async (world) => {
+      await world.compile();
+      return world.query<ImageMark[]>({ selector: '<liveprint-image>', field: 'value' });
+    });
+    expect(shownImages.map(({ from }) => from)).toEqual([38]);
+    expect(imageBoxes(marks, shownImages).map(({ from, path }) => ({ from, path }))).toEqual([{ from: 38, path: 'small.png' }]);
+  });
 });
