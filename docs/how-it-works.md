@@ -59,7 +59,9 @@ A Markdown paragraph is usually one long source line, so linking by line would o
 3. Both texts are reduced to lowercase letters and digits, so curly quotes, dashes, hyphenation and ligatures cannot make them differ. A Myers diff pairs the two. On the sample that is 12,370 printed characters against 12,192 Markdown characters, 178 edits apart, which takes about 3 ms.
 4. Every printed character now has a Markdown offset. A character the diff did not pair, such as a math glyph or a list number, takes its share of the Markdown between its paired neighbours.
 
-The text layer gives only where a run of text starts and how wide it is. Spreading that width evenly over the characters put words up to 22 pt away from where they print (7 pt median). The worker measures each character in the bundled fonts instead, takes the font whose total comes closest to the run's width, and gives the rest of the width to the spaces, where justification puts it.
+The text layer gives only where a run of text starts and how wide it is. Spreading that width evenly over the characters put words up to 22 pt away from where they print (7 pt median). The worker measures the run in each font the theme sets text in instead, each word whole so that kerning counts. It picks the font whose spaces would have to stretch least to fill the run's width, where shrinking a space counts three times as much as stretching one, and gives the difference to the spaces, where justification puts it. A space at the end of a run takes no width, because the run ends at its last letter.
+
+Inside a formula, linking pairs each printed letter or digit with the LaTeX that prints it. The converter lists the letters and digits of the formula's LaTeX outside command names, the names of operators such as `\sin`, and Greek letters such as `\alpha` as the symbol they print. A symbol it cannot name, such as an arrow, takes its share of the LaTeX between its neighbours.
 
 Linking did not change keystroke latency measurably. Over five alternating runs per side of `npm run bench:browser`, typing in the title measured 42.7 ms at p50 before and 42.1 ms after, and the reflowing edit 26.9 ms before and 27.1 ms after. Run to run, each varied by 2 to 5 ms. The worker answers linking requests only after it has posted the edited page, and before it draws pages that are off-screen. Rebuilding the index after a one-word edit takes about 7 ms, and a keystroke that arrives during those 7 ms waits for them. The first request after the page loads took 48 ms in one measurement, because it reads the text layer of every page. A click gets its Markdown offset back in 8 ms at the median.
 
@@ -69,7 +71,26 @@ To check both directions in headless Chrome, run:
 npm run check:linking
 ```
 
-It runs once for each theme. In each, it samples 29 to 37 words from every page, among them a table cell, a code token, a list item, a word right after inline math and a word of a formula that shows as typed. It clicks each word in the preview and checks that the editor cursor lands inside it. Then it puts the cursor inside the word and checks that the bar in the preview lies inside the printed word. The printed word's box comes from the page's pixels, not from the text layer, so the check does not test the index against itself.
+It runs once for each theme. In each, it samples 29 to 37 words from every page, among them a table cell, a code token, a list item, a word right after inline math and a word of a formula that shows as typed. It clicks each word in the preview and checks that the editor cursor lands inside it. Then it puts the cursor inside the word and checks that the bar in the preview lies inside the printed word. The printed word's box comes from the page's pixels, not from the text layer, so the check does not test the index against itself. It also clicks each symbol of `$a \quad \beta \quad \sin \quad 7 \quad \mathbb{R}$`, found as clusters of ink in the page's pixels, and checks that the cursor lands in that symbol's LaTeX. Before formulas gave linking their letters, 3 of the 5 clicks landed in a neighbour's LaTeX.
+
+### Selecting text
+
+Drag across the preview to select its text, or double-click a word, and copy it with **Ctrl+C**. Copying gives the printed text, with a line break where a printed line ends.
+
+Each page has a text layer: its runs of text as transparent HTML over its canvas, as in a PDF viewer. The browser does the selecting. Each run is set in the font the worker fitted it to, with its justification slack on the spaces, so a selected word covers its printed letters.
+
+The text layers are hidden while you type in the editor. They show as soon as the pointer moves or presses in the preview, or the editor loses focus. Over the page bitmaps, they made every redraw cost more layout and paint: with them always there, `npm run bench:browser` counted 1 to 4 main-thread tasks over 16 ms in each typing run, where the build before had none. Text that arrives while the layers are hidden waits and fills them when they show.
+
+Typing did not get slower. Over three alternating runs per side of `npm run bench:browser`, against the build before selecting text, clicks in formulas, sharper SVGs and restoring per tab, typing in the title measured 44.1 to 46.3 ms at p50 before and 44.8 to 46.1 ms after. The reflowing edit measured 29.3 to 37.7 ms before and 30.5 to 33.5 ms after. No run after had a main-thread task over 16 ms, and two runs before had one each.
+
+`check:linking` double-clicks each sampled word and checks that the selection is that word and that its edges lie within 0.3 em of the word's ink. It also drags from one word to a word a few lines below and checks the copied text. This check found four faults in the first version, and the same faults made linking a little less exact:
+
+- The space at the end of a justified line took a share of the line's slack, so words drifted up to 4 pt to the left along the line.
+- The font closest in width picked a bold face for some well-stretched lines.
+- Every theme measured in the fonts loaded at start-up too, and some Paper lines matched Libertinus Bold best.
+- Measuring letter by letter missed the kerning of IBM Plex Sans.
+
+The first version selected 4 of the 33 sampled words in Book more than 0.3 em away from their ink. After the first two fixes, Paper still had 4 of 29 and Modern 3 of 37. Now none do, except an italic word in Paper, whose face Chrome cannot load, so there the check compares only the selected text.
 
 ## Formulas that are not valid yet
 
@@ -126,9 +147,15 @@ In Chrome and Edge, liveprint uses the File System Access API and keeps the file
 
 Opening another file while there are unsaved changes asks first. So does closing or reloading the tab.
 
-liveprint restores the last document when you come back: its text, its name, whether it was edited, its images, and in Chrome its file handle and folder. It keeps a copy in the browser's IndexedDB while you type, one write at a time. This protects against the losses a leave-page warning cannot catch, such as a crash, a closed laptop or a tab the browser discarded. The copy stays in this browser only, so **Edited** still means the file on disk is behind. After a reload, Chrome may ask once for permission to write to the file again.
+When another program changes the open file, liveprint notices when its tab comes back into view. If the editor has no unsaved changes, it takes the new text as one change, which **Ctrl+Z** undoes. If it has, the bar says **Changed on disk** next to a **Reload** button, and the editor keeps your text. **Save** then asks before it overwrites the change. liveprint compares the file's text with the text it last opened or saved, so it keeps no timestamps. It also listens for the browser's own reports of changes to the file (`FileSystemObserver`) where it has them, which no check covers yet. All of this needs the File System Access API and permission to read the file, which Chrome may ask for again after a reload. Until then liveprint cannot look, and **Save** looks once it may write.
 
-To check opening, saving, restoring and dropping in headless Chrome, with the File System Access API and without it, run:
+Each tab keeps its document in the browser's IndexedDB while you type, one write at a time: its text, its name, whether it was edited, its images, and in Chrome its file handle and folder. This protects against the losses a leave-page warning cannot catch, such as a crash, a closed laptop or a tab the browser discarded. The copy stays in this browser only, so **Edited** still means the file on disk is behind. After a reload, Chrome may ask once for permission to write to the file again.
+
+A reload, or reopening a closed tab, brings that tab's own document back, because the tab's sessionStorage names its record. While a tab is open, it holds a Web Lock on its record, so no other tab takes it. A new tab takes the newest document that no open tab holds, so closing your last tab and coming back later brings back the document you worked on last. If every kept document is open in another tab, the new tab starts empty, and a duplicated tab gets a copy. liveprint keeps the 10 newest documents and deletes older ones that no tab holds. Images are kept as bytes, not as Blobs, because WebKit's private browsing hangs on putting a Blob into IndexedDB.
+
+Finding the tab's document costs little. In one run of `check:files` before this and two after, the editor's text was known 73 ms into a reload before and 53 to 54 ms after, and 91 ms into a first visit before and 110 to 112 ms after. The compiler is ready only about 190 ms into a reload and 250 ms into a first visit, so the first pages do not wait for the document.
+
+To check opening, saving, restoring, dropping, changes on disk and several tabs in headless Chrome, with the File System Access API and without it, run:
 
 ```bash
 npm run check:files
@@ -148,7 +175,7 @@ The Markdown records a path relative to the `.md` file, and the image file goes 
 
 - **In this browser.** IndexedDB keeps every image of the document in a store of its own, which liveprint writes only when the images change. Typing never writes image bytes. A reload restores the text and the images without the network.
 - **On disk, with the File System Access API** (Chrome and Edge). **Save** writes the `.md` and every image it names that is not in its folder yet. A file handle cannot reach its folder, so the first save of a file with images asks for the folder that holds it. liveprint refuses a folder that does not contain the file. After that, **Save** writes new images without asking.
-- **On disk, without the API** (Firefox and Safari). **Save** downloads the `.md` and then each image that was not downloaded with it before, so they land side by side in your downloads folder.
+- **On disk, without the API** (Firefox and Safari). **Save** downloads the `.md` and then each image that was not downloaded with it before, so they land side by side in your downloads folder. A download cannot make a folder, and none is needed: liveprint names a pasted or dropped image after its file, beside the document, and an image in a subfolder can only come from reading a folder, so it is on disk already.
 
 A browser lets one click open only one picker. The first save of an untitled document uses that click for the save picker, so its images are not written yet. The bar then says **1 image not saved beside notes.md** next to a **Choose folder** button, and **Save** asks for the folder the next time.
 
@@ -171,6 +198,8 @@ Asking for the marks is cheap. Over 30 keystrokes in the sample with three paste
 ### SVG in the preview
 
 typst.ts draws an SVG image with `new Image()`, which a worker does not have, and Chrome cannot decode SVG in a worker at all. The main thread therefore draws each SVG at 2048 pixels along its longer side and sends that drawing to the worker, where a stand-in `Image` copies it. Only the preview uses the drawing. Typst lays out and prints the SVG itself, so the PDF keeps it as vectors.
+
+When linking finds that an SVG prints larger than its drawing, as a full-column chart does in a wide preview, the worker asks for a drawing at the size it prints, in steps of 256 pixels and at most 16 million pixels. typst.ts keeps its own copy of an image it has drawn, so the main thread sends the SVG again with a comment naming the size, and typst.ts loads it as a new image. Each step costs one compile. In `check:images`, a striped SVG printed about 2800 pixels wide had 1.43 grey pixels at each edge between black and white, and now has 1.07. An edge that falls between two pixels has at least one.
 
 ### Cost
 
@@ -197,7 +226,7 @@ CDP cannot answer the file and folder pickers, so the check answers them with fo
 
 ## Offline
 
-A service worker caches the app after the first visit: the page, the scripts, both WebAssembly files, the fonts used at start-up and the mitex package, about 33 MB in all. A theme's fonts are cached the first time you choose that theme. Later visits make no requests at all, and the app works with no network. You can also install it as an app from the browser's address bar.
+A service worker caches the app after the first visit: the page, the scripts, both WebAssembly files, the fonts used at start-up and the mitex package, about 33 MB in all. A theme's fonts are cached the first time you choose that theme, in a cache named after a hash of the theme fonts, so an update of the app keeps them unless the fonts themselves changed. `check:themes` installs a new `sw.js` and checks that Paper then shows with no font download. Later visits make no requests at all, and the app works with no network. You can also install it as an app from the browser's address bar.
 
 The service worker is written by hand in [`src/sw.ts`](../src/sw.ts), with no plugin and no new dependency. A small Vite plugin, [`build/serviceWorker.ts`](../build/serviceWorker.ts), lists the built files and adds a hash of their contents to `sw.js`. Any change to the build changes `sw.js`, so the browser installs the new version on the next visit and deletes the old cache. The page you have open keeps running the version it started with. The new version shows on the visit after that. The service worker registers only after the first pages show, so on a first visit it does not download the large files while the page is still downloading them.
 
@@ -215,8 +244,11 @@ The throttled runs add 40 ms of latency. The offline row is one load with the se
 What these numbers mean:
 
 - Before, every later visit asked the server about each of 18 files, and those round trips set the warm time on a network. After, the service worker answers all 20 requests and nothing goes over the network.
-- The second visit is no faster than before, and on loopback it is about 330 ms slower. The extra time is in the first compile of the document, which takes about 770 ms on that visit and about 420 ms on later ones. The likely cause, not yet confirmed by a profile, is that the second visit is the first to load the compiler from the service worker's copy. Chrome has no compiled code stored for that copy yet, so it compiles all 28 MB again and stores the result. Before this change, the browser's HTTP cache kept the code compiled on the first visit.
+- The second visit is no faster than before, and on loopback it is about 330 ms slower. `node bench/wasm-cache.mjs` traces visits 2 and 3, each in a new tab, as a reader coming back opens one. The second visit is the first to compile the compiler from the service worker's copy, which has no stored code yet: 3397 functions compile while the first pages wait, which takes 226 ms, and validating the file as it streams in takes 133 ms more. V8 then stores its code beside the copy. The third visit deserializes it and compiles only 344 functions, in 25 ms. The first page came after 1056 ms on the second visit and 729 ms on the third. Before the service worker, the browser's HTTP cache kept the code compiled on the first visit.
+- V8 stores that code only for a Cache Storage entry that a page compiled from through `fetch()` and ran long enough to optimize. Three ways to store it during the first visit did not work: compiling the cached copy in the background once the service worker is active, compiling from `caches.match()` in the worker, and passing the file through the service worker from the network. In each, the second visit still compiled all 3397 functions, and the last two also lost the third visit's stored code. What would work is to compile on the first visit from the service worker's copy, which makes the first visit wait for the whole 33 MB install. That would cost the first visit about what it saves the second, so the design stays.
 - From the third visit on, the time is the same on any network. About 420 ms of it is the first full compile of the document, which is the limit now.
+
+On a first visit, before the service worker has cached anything, the preview says how much of the compiler has arrived, such as **Downloading the typesetter, 4.9 of 28.3 MB**, until the first pages show. The worker counts the bytes as they arrive. Later visits get the file from the service worker unchanged, because a response rebuilt to count its bytes would lose the code V8 stores beside it. The download now starts together with the fonts instead of after them. Over two loopback runs per side of `node bench/load.mjs --runs 2 --warm 3`, a first visit measured 1086 to 1167 ms against 1110 to 1119 ms before, and later visits did not change.
 
 To measure it, run:
 
@@ -227,31 +259,43 @@ node bench/load.mjs --runs 2 --warm 3 --throttle 50 --offline
 
 Without `--throttle` the bench runs over loopback. `--offline` stops the server at the end and loads the page once more. The Chrome profile goes in the system temp folder. If that folder is a small `tmpfs`, Chrome can fail to store the 28 MB WebAssembly file, and the bench prints `service worker: none`. Set `TMPDIR` to a folder on disk to avoid that.
 
+## Browsers
+
+`npm run check:browsers` runs the main paths in Chrome, Firefox and WebKit: typesetting the sample, typing, clicking in the preview, selecting and copying, the Paper theme, the PDF download, opening and saving without the File System Access API, images, restoring after a reload, and the service worker. It uses Playwright's builds of Firefox and WebKit, which `npx playwright-core install firefox webkit` downloads. Playwright's WebKit is not Safari, but it is Safari's engine. All three browsers pass, with Firefox 157 and WebKit 27.2. On Linux, Playwright's WebKit also needs libmanette, libenchant and libhidapi from the system.
+
+The first run found two faults, both fixed:
+
+- In WebKit's private browsing, putting an image's Blob into IndexedDB hung, and every later write waited behind it. A reload then brought back the text from before a paste. Images are now kept as bytes.
+- In Firefox, after a reload in the Paper theme, the worker's `FontFace` for New Computer Modern Italic never finished loading. Measuring the theme's fonts never ended, so no page was drawn. A face that has not loaded within 3 s is now left unmeasured.
+
+Firefox empties the clipboard data of a paste event that a script makes, so there the check reads its image through the folder dialog instead. The other checks, and the linking accuracy that `check:linking` measures, run in Chrome only.
+
 ## Scripts
 
 - `npm test` runs the converter, linking, scheduler and compile tests.
 - `npm run build` type-checks and builds to `dist/`.
 - `npm run bench` compares compile cost of cmarker and the JavaScript converter in Node.
 - `npm run bench:browser` measures keystroke latency in headless Chrome, in the Book theme on A4. `node bench/browser.mjs --theme modern` measures another theme, `--switch` measures choosing a theme, `--images` compares typing with and without images, and `--math` types the sample's formulas one key at a time.
-- `npm run check:linking` checks clicking in the preview and following the cursor in headless Chrome, in each theme.
-- `npm run check:files` checks opening, saving, restoring and dropping files in headless Chrome.
+- `npm run check:linking` checks clicking in the preview, following the cursor, selecting and copying text and clicking symbols in a formula in headless Chrome, in each theme.
+- `npm run check:files` checks opening, saving, restoring and dropping files, changes on disk and several tabs in headless Chrome.
 - `npm run check:images` checks pasting, dropping, restoring, saving and linking images in headless Chrome.
-- `npm run check:themes` checks what happens when a theme's fonts fail to download, with the service worker and without it.
+- `npm run check:themes` checks what happens when a theme's fonts fail to download, with the service worker and without it, and that an update keeps the cached theme fonts.
+- `npm run check:browsers` checks the main paths in Chrome, Firefox and WebKit. It needs `npx playwright-core install firefox webkit` first.
 - `npm run bench:load` measures the time to the first page, cold and warm, in headless Chrome.
+- `node bench/wasm-cache.mjs` traces whether V8 compiles the compiler again on the second and third visits.
 - `npm run record:demo` records `docs/demo.gif` in headless Chrome. It needs `ffmpeg`.
 
 ## Known limits
 
-- The compiler WebAssembly is 28 MB, or 10.8 MB gzipped, so the first visit is slow. Later visits load it from the service worker's cache.
-- After an update, the theme fonts cached before it are downloaded again the next time you choose that theme, and until then they are not available offline.
-- Only one document is restored. If two tabs are open, the one that wrote last is the one that comes back.
-- If a file changes on disk while it is open in liveprint, liveprint does not notice, and **Save** overwrites the change.
-- Only Chrome has been tested. The Firefox and Safari paths for opening and saving are tested in Chrome with the API removed.
+- The compiler WebAssembly is 28 MB, or 10.8 MB gzipped, so the first visit is slow. The preview shows how much has arrived.
+- The second visit compiles the compiler again, which costs about 330 ms on loopback, as [Offline](#offline) explains. Later visits reuse the stored code.
+- Firefox and WebKit are tested with Playwright's builds, not with released Firefox and Safari. A real paste in Firefox is untested, and linking accuracy is measured in Chrome only.
 - The real file and folder pickers and permission prompts are not tested, because CDP cannot answer them. Asking again for a folder's permission after a reload is untested too.
-- Images in subfolders, such as `figures/plot.png`, are covered by unit tests only. Without the API, **Save** downloads `figures/plot.png` as `plot.png`.
-- An SVG in the preview is a 2048-pixel drawing, so it can blur at high zoom. The PDF is not affected.
+- liveprint keeps the 10 newest documents, but nothing in the app lists them. A new tab gets the newest one that no other tab has open.
+- liveprint notices a change on disk only with the File System Access API and permission to read the file, and only when the tab comes back into view, unless the browser reports the change itself.
+- The preview's text layers show only while you point at the preview or work outside the editor, so the browser's find bar finds preview text only then.
+- The preview draws pages at no more than twice the screen's pixel density, so at higher browser zoom its text and images look soft. The PDF is not affected.
 - Opening a document with images can compile the previous document once more before the new one. In five measured opens, the new document's first pages took 73 to 100 ms either way.
-- Linking inside math is approximate. A click on a formula puts the cursor in its LaTeX in proportion to the glyph's position, not on the matching symbol.
-- Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking measures body text with the math font's upright letters, which have the same design, and the menu sets the name Paper in the math font.
+- In a formula, a symbol that is not a letter, a digit, an operator name or a Greek letter, such as an arrow, links to its share of the LaTeX between its neighbours.
+- Chrome cannot load New Computer Modern Regular and Italic as web fonts, although Typst can. In the Paper theme, linking and selecting measure body text with the math font's upright letters, which have the same design and advances, and italic text in the regular face, so a selected italic word can be a few points off its letters. The menu sets the name Paper in the math font.
 - A formula that shows as typed also prints as typed in **Download .pdf**.
-- Text selection in the preview is not built yet.
