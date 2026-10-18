@@ -13,6 +13,8 @@ export interface TextPiece {
   text: string;
   /** `text` is the symbol a LaTeX command at `from` prints, such as α for `\alpha`, not a copy of the Markdown. */
   symbol?: true;
+  /** `text` prints out of the Markdown's order: a footnote at the foot of its page, or a heading in the table of contents. */
+  aside?: true;
 }
 
 export interface Converted {
@@ -71,6 +73,14 @@ interface Doc {
   rejected: Pick<ReadonlySet<MathCall>, 'has'>;
   typedMath: MathCall[];
   frontMatter: FrontMatter | null;
+  /** Footnote definitions by label, folded as link labels are. */
+  footnotes: ReadonlyMap<string, SyntaxNode>;
+  /** The footnotes already printed, by label, with the number of each one's Typst label. */
+  noted: Map<string, number>;
+  /** Whether a footnote is being printed, inside which a reference stays text. */
+  inFootnote: boolean;
+  /** Whether a heading is being printed, which the table of contents prints again. */
+  inHeading: boolean;
 }
 
 type Emit = (node: SyntaxNode, doc: Doc) => string;
@@ -167,7 +177,12 @@ function link(url: string, body: string): string {
 }
 
 function heading(level: number): Emit {
-  return (node, doc) => `#heading(level: ${level})[${inline(node, doc)}]`;
+  return (node, doc) => {
+    doc.inHeading = true;
+    const body = inline(node, doc);
+    doc.inHeading = false;
+    return `#heading(level: ${level})[${body}]`;
+  };
 }
 
 function list(node: SyntaxNode, doc: Doc): string {
@@ -379,14 +394,67 @@ const frontMatter: Emit = (node, doc) => {
   return `#title-block(${args.join(', ')})`;
 };
 
+/** The pieces `print` adds, marked as asides: text that prints out of the Markdown's order. */
+function aside(doc: Doc, print: () => string): string {
+  const pieces = doc.pieces;
+  doc.pieces = [];
+  const out = print();
+  pieces.push(...doc.pieces.map((piece): TextPiece => ({ ...piece, aside: true })));
+  doc.pieces = pieces;
+  return out;
+}
+
+const footnoteLabel = (node: SyntaxNode, doc: Doc) => FOOTNOTE_LABEL.exec(slice(node, doc))![1]!.toLowerCase();
+const FOOTNOTE_LABEL = /^\[\^([^\]]+)\]/;
+
+/**
+ * A footnote prints its definition where the first reference to it is; a later reference repeats its number. A
+ * reference with no definition, or inside a footnote, shows as typed. One in a heading has no Typst label, since the
+ * table of contents prints the heading again and a label may occur once, so the next reference prints it again.
+ */
+const footnoteReference: Emit = (node, doc) => {
+  const label = footnoteLabel(node, doc);
+  const definition = doc.footnotes.get(label);
+  if (!definition || doc.inFootnote) return escapeText(verbatim(doc, node.from, node.to));
+  const number = doc.noted.get(label);
+  if (number !== undefined) return `#footnote(<liveprint-footnote-${number}>)`;
+  doc.inFootnote = true;
+  const body = aside(doc, () => blocks(contentOf(definition), doc));
+  doc.inFootnote = false;
+  if (doc.inHeading) return `#footnote[${body}]`;
+  doc.noted.set(label, doc.noted.size);
+  return `#footnote[${body}]<liveprint-footnote-${doc.noted.size - 1}>`;
+};
+
+const HEADING = /^(?:ATX|Setext)Heading([1-6])$/;
+/** The heading levels the table of contents lists. */
+const CONTENTS_DEPTH = 3;
+
+/** The table of contents. Its entries print the headings' text again, so they link to the headings as asides. */
+const tableOfContents: Emit = (node, doc) => {
+  let root = node;
+  while (root.parent) root = root.parent;
+  const headings: SyntaxNode[] = [];
+  root.cursor().iterate((n) => {
+    const level = HEADING.exec(n.name)?.[1];
+    if (level && Number(level) <= CONTENTS_DEPTH) headings.push(n.node);
+  });
+  const scratch: Doc = { ...doc, pieces: [], images: new Set(), shownImages: [], typedMath: [], noted: new Map(), inFootnote: true };
+  aside(scratch, () => headings.map((heading) => inline(heading, scratch)).join(''));
+  doc.pieces.push(...scratch.pieces);
+  return `#outline(depth: ${CONTENTS_DEPTH})`;
+};
+
 const MARKS = new Set([
   'ListMark', 'QuoteMark', 'HeaderMark', 'EmphasisMark', 'CodeMark', 'CodeInfo', 'LinkMark', 'LinkLabel', 'LinkTitle',
-  'TaskMarker', 'StrikethroughMark', 'TableDelimiter', 'MathMark', 'FrontMatterMark', 'FrontMatterKey', 'FrontMatterValue',
+  'TaskMarker', 'StrikethroughMark', 'TableDelimiter', 'MathMark', 'FrontMatterMark', 'FrontMatterKey', 'FrontMatterValue', 'FootnoteLabel',
 ]);
 
 const EMITTERS: Record<string, Emit> = {
   Document: (node, doc) => blocks(childrenOf(node), doc),
   FrontMatter: frontMatter,
+  FootnoteDefinition: drop,
+  TableOfContents: tableOfContents,
   Paragraph: (node, doc) => blockImages(node, doc) ?? inline(node, doc),
   ATXHeading1: heading(1), ATXHeading2: heading(2), ATXHeading3: heading(3),
   ATXHeading4: heading(4), ATXHeading5: heading(5), ATXHeading6: heading(6),
@@ -441,6 +509,7 @@ const EMITTERS: Record<string, Emit> = {
     const url = node.getChild('URL');
     return url ? emit(url, doc) : escapeText(verbatim(doc, node.from, node.to));
   },
+  FootnoteReference: footnoteReference,
   HardBreak: () => '#linebreak();',
   Escape: (node, doc) => escapeText(verbatim(doc, node.from + 1, node.to)),
   Entity: (node, doc) => escapeText(shown(doc, node.from, entity(slice(node, doc)))),
@@ -453,6 +522,17 @@ function emit(node: SyntaxNode, doc: Doc): string {
   if (MARKS.has(node.name)) return '';
   const emitter = EMITTERS[node.name];
   return emitter ? emitter(node, doc) : paragraphFallback(node, doc);
+}
+
+/** Every footnote definition by its folded label; the first of two with one label wins. */
+function collectFootnotes(root: SyntaxNode, src: string): Map<string, SyntaxNode> {
+  const footnotes = new Map<string, SyntaxNode>();
+  root.cursor().iterate((n) => {
+    if (n.name !== 'FootnoteDefinition') return;
+    const label = FOOTNOTE_LABEL.exec(src.slice(n.from, n.to))![1]!.toLowerCase();
+    if (!footnotes.has(label)) footnotes.set(label, n.node);
+  });
+  return footnotes;
 }
 
 function collectRefs(root: SyntaxNode, src: string): Map<string, Ref> {
@@ -485,7 +565,7 @@ export function convert(
 ): Converted {
   const src = markdown.replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD');
   const root = markdownParser.parse(src).topNode;
-  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null };
+  const doc: Doc = { src, refs: collectRefs(root, src), pieces: [], available, images: new Set(), shownImages: [], rejected, typedMath: [], frontMatter: null, footnotes: collectFootnotes(root, src), noted: new Map(), inFootnote: false, inHeading: false };
   const typst = `${emit(root, doc)}\n`;
   return { typst, pieces: doc.pieces, images: [...doc.images], shownImages: doc.shownImages, typedMath: doc.typedMath, frontMatter: doc.frontMatter };
 }

@@ -61,6 +61,23 @@ function continues(line: Line, run: Run): boolean {
   return Math.min(line.bottom, run.y + run.h) > Math.max(line.top, run.y) && run.x >= previous.x + previous.w - 1;
 }
 
+/** The folded letters and digits of `pieces`, in order, and the Markdown offset of each. */
+function units(pieces: TextPiece[]): [number[], number[]] {
+  const codes: number[] = [];
+  const offsets: number[] = [];
+  for (const { from, text } of pieces) {
+    let at = from;
+    for (const char of text) {
+      for (const unit of fold(char)) {
+        codes.push(unit.codePointAt(0)!);
+        offsets.push(at);
+      }
+      at += char.length;
+    }
+  }
+  return [codes, offsets];
+}
+
 const gap = (from: number, to: number, at: number) => (at < from ? from - at : at > to ? at - to : 0);
 
 /** Index of the item nearest by `distance`, the last on a tie: where one run ends and the next begins, the next one's first character is the real offset. */
@@ -75,18 +92,29 @@ function nearest<T>(items: T[], distance: (item: T) => number): number {
  * converter showed. Both sides fold to letters and digits and a diff pairs them up; every rendered character then
  * has an offset. One the diff left unpaired (a math glyph, a list number, a space) takes its share of the Markdown
  * between its paired neighbours, which is the offset just after the previous one when nothing lies between.
+ *
+ * Aside pieces print out of the Markdown's order: a footnote at the foot of its page, a heading again in the table of
+ * contents. They stay out of that diff, which needs both sides in order. A second diff pairs them with the rendered
+ * characters the first left unpaired, and a click on one of those goes to its aside offset.
  */
 export class SourceIndex {
   readonly #pages: LaidOut[];
   /** Per rendered character, in reading order: its Markdown offset (never decreasing), whether the diff paired it, and its run. */
   readonly #offsets: Int32Array;
   readonly #paired: Uint8Array;
+  /** Per rendered character, the offset of the aside piece it prints, or -1. */
+  readonly #asides: Int32Array;
+  /** The first rendered character of each aside offset. */
+  readonly #asideAt: Map<number, number>;
   readonly #placed: Placed[];
 
-  private constructor(pages: LaidOut[], offsets: Int32Array, paired: Uint8Array, placed: Placed[]) {
+  private constructor(pages: LaidOut[], offsets: Int32Array, paired: Uint8Array, asides: Int32Array, placed: Placed[]) {
     this.#pages = pages;
     this.#offsets = offsets;
     this.#paired = paired;
+    this.#asides = asides;
+    this.#asideAt = new Map();
+    asides.forEach((offset, char) => offset >= 0 && !this.#asideAt.has(offset) && this.#asideAt.set(offset, char));
     this.#placed = placed;
   }
 
@@ -123,19 +151,7 @@ export class SourceIndex {
       return { width, height, lines };
     });
 
-    const source: number[] = [];
-    const sourceOffset: number[] = [];
-    for (const { from, text } of pieces) {
-      let at = from;
-      for (const char of text) {
-        for (const unit of fold(char)) {
-          source.push(unit.codePointAt(0)!);
-          sourceOffset.push(at);
-        }
-        at += char.length;
-      }
-    }
-
+    const [source, sourceOffset] = units(pieces.filter((p) => !p.aside));
     const offsets = new Int32Array(byChar.length).fill(-1);
     const paired = new Uint8Array(byChar.length);
     const pairs = matchPairs(rendered, source);
@@ -144,6 +160,17 @@ export class SourceIndex {
       if (paired[char]) continue;
       paired[char] = 1;
       offsets[char] = sourceOffset[pairs[i + 1]!]!;
+    }
+
+    const asides = new Int32Array(byChar.length).fill(-1);
+    const [aside, asideOffset] = units(pieces.filter((p) => p.aside));
+    if (aside.length > 0) {
+      const left = rendered.flatMap((_, unit) => (paired[renderedChar[unit]!] ? [] : [unit]));
+      const leftPairs = matchPairs(left.map((unit) => rendered[unit]!), aside);
+      for (let i = 0; i < leftPairs.length; i += 2) {
+        const char = renderedChar[left[leftPairs[i]!]!]!;
+        if (asides[char]! < 0) asides[char] = asideOffset[leftPairs[i + 1]!]!;
+      }
     }
     let previous = -1;
     for (let char = 0; char <= offsets.length; char++) {
@@ -154,7 +181,7 @@ export class SourceIndex {
       for (let j = 0; j < count; j++) offsets[previous + 1 + j] = start + Math.floor((j * room) / count);
       previous = char;
     }
-    return new SourceIndex(laidOut, offsets, paired, byChar);
+    return new SourceIndex(laidOut, offsets, paired, asides, byChar);
   }
 
   /** Markdown offset under a point on a page (fractions). Nearest run on the nearest line if the point is between runs. */
@@ -167,7 +194,12 @@ export class SourceIndex {
     const placed = runs[nearest(runs, ({ run }) => gap(run.x, run.x + run.w, x))]!;
     const boundary = nearest(placed.edges, (edge) => Math.abs(edge - x));
     const count = placed.edges.length - 1;
-    return boundary < count ? this.#offsets[placed.first + boundary]! : this.#offsets[placed.first + count - 1]! + 1;
+    return boundary < count ? this.#offsetOf(placed.first + boundary) : this.#offsetOf(placed.first + count - 1) + 1;
+  }
+
+  #offsetOf(char: number): number {
+    const aside = this.#asides[char]!;
+    return aside >= 0 ? aside : this.#offsets[char]!;
   }
 
   /** Where a Markdown offset renders: before the first character at or after it, or right after the one before it. */
@@ -185,6 +217,11 @@ export class SourceIndex {
     for (let char = lo; char < offsets.length && offsets[char] === offset; char++) {
       if (this.#paired[char]) return this.#spot(char, false);
     }
+    // Markdown only an aside prints, such as a footnote's text, is found where the aside prints.
+    const aside = this.#asideAt.get(offset);
+    if (aside !== undefined) return this.#spot(aside, false);
+    const before = this.#asideAt.get(offset - 1);
+    if (before !== undefined) return this.#spot(before, true);
     if (lo === offsets.length) return this.#spot(lo - 1, true);
     if (lo > 0 && offsets[lo]! > offset && offset === offsets[lo - 1]! + 1) return this.#spot(lo - 1, true);
     return this.#spot(lo, false);

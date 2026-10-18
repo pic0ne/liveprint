@@ -237,3 +237,46 @@ test.each([
 ])('calendarDate(%j)', (text, date) => {
   expect(calendarDate(text)).toEqual(date);
 });
+
+describe('convert: footnotes', () => {
+  test('a reference prints its definition as a footnote, and a later one repeats its number', () => {
+    expect(convert('A[^n] b[^N].\n\n[^n]: The *note*.').typst).toBe('A#footnote[The #emph[note];.]<liveprint-footnote-0> b#footnote(<liveprint-footnote-0>).\n');
+  });
+
+  test('a definition holds paragraphs on indented lines, and ends at the next definition', () => {
+    expect(convert('A[^1] B[^2]\n\n[^1]: One.\n\n    Two.\n[^2]: Three.').typst).toBe('A#footnote[One.\n\nTwo.]<liveprint-footnote-0> B#footnote[Three.]<liveprint-footnote-1>\n');
+  });
+
+  test('a reference with no definition, or inside a footnote, shows as typed; an unused definition prints nothing', () => {
+    expect(convert('A[^x] B[^1]\n\n[^1]: See[^1].\n\n[^2]: Unused.').typst).toBe('A\\[^x\\] B#footnote[See\\[^1\\].]<liveprint-footnote-0>\n');
+  });
+
+  test('the footnote text links to its definition as an aside, where the reference is', () => {
+    expect(convert('A[^1] b.\n\n[^1]: Note.').pieces).toEqual([
+      { from: 0, text: 'A' },
+      { from: 16, text: 'Note.', aside: true },
+      { from: 5, text: ' b.' },
+    ]);
+  });
+});
+
+describe('convert: table of contents', () => {
+  test('a [[toc]] line is an outline of the headings to level 3', () => {
+    expect(convert('Intro\n[[TOC]]\n\n# A\n\n#### Deep').typst).toBe('Intro\n\n#outline(depth: 3)\n\n#heading(level: 1)[A]\n\n#heading(level: 4)[Deep]\n');
+  });
+
+  test('its entries link to the headings as asides, and the headings still link where they print', () => {
+    expect(convert('[[toc]]\n\n# Alpha\n\n## *Beta*').pieces).toEqual([
+      { from: 10, text: ' Alpha', aside: true },
+      { from: 20, text: ' ', aside: true },
+      { from: 22, text: 'Beta', aside: true },
+      { from: 10, text: ' Alpha' },
+      { from: 20, text: ' ' },
+      { from: 22, text: 'Beta' },
+    ]);
+  });
+
+  test('[[toc]] inside a paragraph is text', () => {
+    expect(convert('See [[toc]] here').typst).toBe('See \\[\\[toc\\]\\] here\n');
+  });
+});

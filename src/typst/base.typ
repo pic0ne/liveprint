@@ -31,6 +31,8 @@
   date-text(date, "[month repr:long] [day padding:none], [year]")
 })
 
+#show outline: it => block(below: 2em, it)
+
 #let task(done, body) = {
   box(
     width: 0.72em,

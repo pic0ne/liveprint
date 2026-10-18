@@ -5,7 +5,7 @@ import { SourceIndex } from './sourceIndex';
 
 // Pages are 100 pt square and runs 5 pt per character, so fractions read as pt / 100.
 const run = (text: string, x: number, y: number): Run => ({ text, x, y, w: 5 * [...text].length, h: 10 });
-const index = (runs: Run[], pieces: { from: number; text: string }[]) => SourceIndex.build([{ width: 100, height: 100, runs }], pieces);
+const index = (runs: Run[], pieces: { from: number; text: string; aside?: true }[]) => SourceIndex.build([{ width: 100, height: 100, runs }], pieces);
 const spot = (page: number, x: number, y: number, h: number, lineLeft: number, lineRight: number) => ({ kind: 'text', page, x, y, h, lineLeft, lineRight });
 
 describe('SourceIndex', () => {
@@ -107,6 +107,28 @@ describe('SourceIndex', () => {
       }
     }
     expect(missed).toEqual([]);
+  });
+  test('a footnote prints at the foot of the page, after text the Markdown has later, and links to its definition', () => {
+    // Body one[^1] body two.\n\n[^1]: Note text.
+    const noted = index(
+      [run('Body one1 body two.', 0, 10), run('1 Note text.', 0, 80)],
+      [{ from: 0, text: 'Body one' }, { from: 30, text: 'Note text.', aside: true }, { from: 12, text: ' body two.' }],
+    );
+    expect(noted.sourceAt(0, 0.11, 0.85)).toBe(30);
+    expect(noted.sourceAt(0, 0.51, 0.15)).toBe(13);
+    expect(noted.spotOf(35)).toEqual(spot(0, 0.35, 0.8, 0.1, 0, 0.6));
+    expect(noted.spotOf(13)).toEqual(spot(0, 0.5, 0.1, 0.1, 0, 0.95));
+  });
+
+  test('a heading in the table of contents links to the heading, which the cursor still marks in the text', () => {
+    // [[toc]]\n\n# Alpha\n\nText.
+    const contents = index(
+      [run('Contents', 0, 0), run('Alpha 1', 0, 12), run('Alpha', 0, 40), run('Text.', 0, 55)],
+      [{ from: 11, text: 'Alpha', aside: true }, { from: 11, text: 'Alpha' }, { from: 18, text: 'Text.' }],
+    );
+    expect(contents.sourceAt(0, 0.06, 0.15)).toBe(12);
+    expect(contents.sourceAt(0, 0.06, 0.45)).toBe(12);
+    expect(contents.spotOf(12)).toEqual(spot(0, 0.05, 0.4, 0.1, 0, 0.25));
   });
 });
 

@@ -37,6 +37,8 @@ const adversarial: Record<string, string> = {
   'code with Typst string specials': '```"\\n\n"\\"\\\\ \t\r```\n\n`` `"\\` ``\n\n    "\\',
   'odd ordered lists and tables': '0. a\n\n999999999. b\n\n|a|\n|-|\n\n| a | b |\n|---|---|\n| \\| | `|` |',
   'dollars that are not math': '$5 and $6, a lone $ sign, $ spaced $, $$ alone',
+  'footnotes and contents': '[[toc]]\n\n# H[^x]\n\nA[^x][^y] [^] [^a"b]\n\n[^x]: *n* [^x] $x$\n[^y]:\n\n> [^z]: q\n\n[^a"b]: `c`\n\n- [[toc]]',
+  'front matter': '---\ntitle: "#t" [x] $y$ \\\nauthor: ["*a*", b\\]\ndate: 2026-02-30\n---\n\nText',
   'headings and breaks at the edges': '#\n\n######\n\n=\n\n-\n\n***\n\na  \n\\',
   'the sample document': repoText('src/sample.md'),
 };

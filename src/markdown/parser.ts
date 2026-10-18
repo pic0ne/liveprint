@@ -162,10 +162,85 @@ const FrontMatterSyntax: MarkdownConfig = {
   parseBlock: [{ name: 'FrontMatter', parse: parseFrontMatter, before: 'HorizontalRule' }],
 };
 
+const FOOTNOTE_LABEL = /^\[\^([^\]\s]+)\]/;
+/** The label of a footnote definition that `text` opens. A definition ends the paragraph before it. */
+function isFootnoteDefinition(text: string): RegExpExecArray | null {
+  const label = FOOTNOTE_LABEL.exec(text);
+  return label && text[label[0].length] === ':' ? label : null;
+}
+/** A definition's text continues on lines indented this far, as in GitHub's footnotes. */
+const FOOTNOTE_INDENT = 4;
+
 /**
- * The one Markdown dialect: CommonMark + GFM + `$..$` / `$$..$$` math + YAML front matter. The editor and the
- * converter both use it.
+ * GitHub's footnotes: `[^label]` refers to a definition `[^label]: text`, whose later lines are indented. A
+ * definition is a block of its own, like a list item, so it can hold several paragraphs.
  */
-export const markdownExtensions: MarkdownExtension = [GFM, MathSyntax, FrontMatterSyntax];
+const FootnoteSyntax: MarkdownConfig = {
+  defineNodes: [
+    {
+      name: 'FootnoteDefinition',
+      block: true,
+      composite(_cx, line, value) {
+        if (line.indent < line.baseIndent + value && line.next > -1) return false;
+        line.moveBaseColumn(line.baseIndent + value);
+        return true;
+      },
+    },
+    { name: 'FootnoteReference', style: tags.labelName },
+    { name: 'FootnoteLabel', style: tags.labelName },
+  ],
+  parseBlock: [
+    {
+      name: 'FootnoteDefinition',
+      parse(cx, line) {
+        const label = isFootnoteDefinition(line.text.slice(line.pos));
+        if (!label) return false;
+        const from = cx.lineStart + line.pos;
+        cx.startComposite('FootnoteDefinition', line.pos, FOOTNOTE_INDENT);
+        cx.addElement(cx.elt('FootnoteLabel', from, from + label[0].length + 1));
+        line.moveBase(line.skipSpace(line.pos + label[0].length + 1));
+        return null;
+      },
+      endLeaf: (_cx, line) => isFootnoteDefinition(line.text.slice(line.pos)) !== null,
+      before: 'LinkReference',
+    },
+  ],
+  parseInline: [
+    {
+      name: 'FootnoteReference',
+      parse(cx, next, pos) {
+        if (next !== 91 /* [ */ || cx.char(pos + 1) !== 94 /* ^ */) return -1;
+        const label = FOOTNOTE_LABEL.exec(cx.slice(pos, cx.end));
+        return label ? cx.addElement(cx.elt('FootnoteReference', pos, pos + label[0].length)) : -1;
+      },
+      before: 'Link',
+    },
+  ],
+};
+
+/** A `[[toc]]` line, where the table of contents goes. */
+const TOC_LINE = /^\[\[toc\]\][ \t]*$/i;
+const TocSyntax: MarkdownConfig = {
+  defineNodes: [{ name: 'TableOfContents', block: true, style: tags.processingInstruction }],
+  parseBlock: [
+    {
+      name: 'TableOfContents',
+      parse(cx, line) {
+        if (!TOC_LINE.test(line.text.slice(line.pos))) return false;
+        cx.addElement(cx.elt('TableOfContents', cx.lineStart + line.pos, cx.lineStart + line.text.length));
+        cx.nextLine();
+        return true;
+      },
+      endLeaf: (_cx, line) => TOC_LINE.test(line.text.slice(line.pos)),
+      before: 'LinkReference',
+    },
+  ],
+};
+
+/**
+ * The one Markdown dialect: CommonMark + GFM + `$..$` / `$$..$$` math + YAML front matter + footnotes + `[[toc]]`. The
+ * editor and the converter both use it.
+ */
+export const markdownExtensions: MarkdownExtension = [GFM, MathSyntax, FrontMatterSyntax, FootnoteSyntax, TocSyntax];
 
 export const markdownParser = commonmark.configure(markdownExtensions);
