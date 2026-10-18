@@ -5,7 +5,7 @@
 // in Paper, whose face Chrome cannot load, where only the selected text is checked). A word's box is found in the
 // page's pixels, as the ink between the gaps that separate its run's words, so neither the source index nor its
 // character measuring decides what counts as correct. A formula mitex rejects is added to the first paragraph, and
-// a word of its LaTeX, shown as typed, is sampled too. Then (d) a click on each symbol of a formula puts the cursor
+// a word of its LaTeX, shown as typed, is sampled too, as are words of a front matter title and author. Then (d) a click on each symbol of a formula puts the cursor
 // in that symbol's LaTeX, and (e) a drag across two lines selects and copies the text between.
 // node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
 import { parseArgs } from 'node:util';
@@ -52,9 +52,12 @@ const TYPED = '$\\foo zeugma$';
 // Its own paragraph, so it prints on a line of its own, and quads part its symbols into clusters of ink.
 const FORMULA = '$a \\quad \\beta \\quad \\sin \\quad 7 \\quad \\mathbb{R}$';
 const SYMBOLS = ['a', '\\beta', '\\sin', '7', '\\mathbb{R}'];
+// Front matter with words found nowhere else, so its title and authors are sampled.
+const FRONT = '---\ntitle: Quillwort almanac\nauthor: [Ottoline Vexby, Barnaby Quist]\ndate: 2026-10-18\n---\n\n';
 await evaluate(`(() => {
   __shown = null;
-  ${view}.dispatch({ changes: { from: ${view}.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.\n\n${FORMULA}`)} } });
+  const v = ${view};
+  v.dispatch({ changes: [{ from: 0, insert: ${JSON.stringify(FRONT)} }, { from: v.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.\n\n${FORMULA}`)} }] });
 })()`);
 await until('the typed formula drawn', () => evaluate('__shown?.final'));
 await sleep(1000);
@@ -131,6 +134,7 @@ function kindAt(offset) {
   if (offset > typed[0] && offset < typed[1]) return 'typed math';
   const lineStart = markdown.lastIndexOf('\n', offset - 1) + 1;
   const line = markdown.slice(lineStart, markdown.indexOf('\n', offset) >>> 0);
+  if (offset < FRONT.length) return /^\w+/.exec(line)[0];
   if (fences.some(([a, b]) => offset > a && offset < b)) return 'code';
   if (line.startsWith('|')) return 'table cell';
   if (/^\s*([-*+]|\d+\.)\s/.test(line)) return 'list item';
@@ -170,7 +174,7 @@ for (const m of markdown.matchAll(/\$[^$\n]+\$[\s,.;:]*([\p{L}\p{N}]+)((?:\s+[\p
 }
 
 const picked = new Set();
-const KINDS = ['table cell', 'code', 'list item', 'after math', 'typed math'];
+const KINDS = ['title', 'author', 'table cell', 'code', 'list item', 'after math', 'typed math'];
 for (const kind of KINDS) {
   const found = candidates.find((c) => c.kind === kind);
   if (found) picked.add(found);
@@ -355,6 +359,25 @@ const timing = await evaluate(`new Promise((resolve) => {
   __worker.postMessage({ kind: 'edit', rev: 1e6, markdown: ${JSON.stringify(edited)} });
   __worker.postMessage({ kind: 'locate', id: 1e9 + 1, offset: 5000 });
 })`);
+// The editor sets the front matter's marks and keys in the muted colour of other Markdown syntax, and its values in ink.
+const colours = await evaluate(`(() => {
+  const colour = (text, exact = true) => {
+    const walker = document.createTreeWalker(document.querySelector('.cm-content'), NodeFilter.SHOW_TEXT);
+    for (let node; (node = walker.nextNode()); ) {
+      if (exact ? node.textContent === text : node.textContent.includes(text)) return getComputedStyle(node.parentElement).color;
+    }
+    return null;
+  };
+  const probe = (name) => {
+    const span = Object.assign(document.createElement('span'), { style: \`color: var(--\${name})\` });
+    document.querySelector('.cm-content').append(span);
+    const value = getComputedStyle(span).color;
+    span.remove();
+    return value;
+  };
+  return { key: colour('title'), mark: colour('---'), value: colour('Quillwort almanac', false), muted: probe('muted'), ink: probe('ink') };
+})()`);
+const highlightOk = colours.key === colours.muted && colours.mark === colours.muted && colours.value === colours.ink && colours.muted !== colours.ink;
 const sourcedMs = await evaluate('__sourced');
 await close();
 
@@ -369,9 +392,10 @@ const sorted = sourcedMs.sort((a, b) => a - b);
 console.log(`\n${results.length} words on ${new Set(results.map((r) => r.page)).size} of ${pages.length} pages, from ${candidates.length} unambiguous candidates; ${failed.length} failed`);
 console.log(`clicks on the symbols of ${FORMULA}: ${formulaOk ? 'pass' : 'FAIL'} ${formulaResults.map((r) => `${r.symbol} ${r.ok ? 'ok' : `at ${JSON.stringify(r.at)}`}`).join(', ') || 'no formula line found'}`);
 console.log(`drag from ${JSON.stringify(from?.text)} to ${JSON.stringify(to?.text)} and copy: ${dragged.ok ? 'pass' : 'FAIL'} ${JSON.stringify(dragged.text)}`);
+console.log(`front matter in the editor: ${highlightOk ? 'pass' : 'FAIL'} ${JSON.stringify(colours)}`);
 console.log(`click to source offset: median ${sorted[sorted.length >> 1].toFixed(1)} ms, max ${sorted[sorted.length - 1].toFixed(1)} ms`);
 console.log(`edit then locate: visible pages after ${timing.drawn.toFixed(1)} ms, located after ${timing.located.toFixed(1)} ms`);
 const kinds = new Set(results.map((r) => r.kind));
 const missing = KINDS.filter((k) => !kinds.has(k));
 if (missing.length > 0) console.log(`no unambiguous word found of kind: ${missing.join(', ')}`);
-process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk ? 1 : 0);
+process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk || !highlightOk ? 1 : 0);
