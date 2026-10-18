@@ -183,7 +183,15 @@ const { view: editor, load } = createEditor(
   (files) => insertImages(files, null),
 );
 // Capture phase on the editor root runs before CodeMirror's own handlers apply the edit.
-editor.dom.addEventListener('keydown', (e) => (inputStart = e.timeStamp), true);
+editor.dom.addEventListener(
+  'keydown',
+  (e) => {
+    inputStart = e.timeStamp;
+    pages.typing();
+  },
+  true,
+);
+editor.dom.addEventListener('focusout', () => pages.reading());
 editor.dom.addEventListener('beforeinput', (e) => (inputStart ??= e.timeStamp), true);
 editor.dom.addEventListener('keyup', () => (inputStart = null), true);
 await workerImages.show(images);
@@ -444,8 +452,9 @@ $('choose-folder').addEventListener('click', () => void chooseImageFolder());
 $('reload').addEventListener('click', () => void reload());
 $('save').addEventListener('click', (e) => void save(e.shiftKey));
 
+// A click links to the editor. A drag or double click that selected text does not, so the selection stays.
 $('pages').addEventListener('click', (e) => {
-  const point = pages.pointAt(e);
+  const point = pages.selecting ? null : pages.pointAt(e);
   if (!point) return;
   clicked = ++linkId;
   send({ kind: 'source', id: clicked, ...point });
@@ -513,7 +522,10 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       download(pdfName(file.name), new Blob([data.bytes], { type: 'application/pdf' }));
       break;
     case 'sourced':
-      if (data.id === clicked && data.offset !== null) jumpTo(editor, data.offset);
+      if (data.id === clicked && data.offset !== null && !pages.selecting) jumpTo(editor, data.offset);
+      break;
+    case 'text':
+      pages.showText(data.pages);
       break;
     case 'located':
       if (data.id < spotShown) break;

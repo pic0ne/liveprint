@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { fittedEdges } from './edges';
+import { fitRuns } from './edges';
 import type { Run } from './runs';
 import { SourceIndex } from './sourceIndex';
 
@@ -110,16 +110,36 @@ describe('SourceIndex', () => {
   });
 });
 
-describe('fittedEdges', () => {
-  const narrowI = (c: string) => (c === 'i' ? 0.25 : 0.5);
-  const mono = () => 0.6;
-  const edges = fittedEdges([narrowI, mono]);
+describe('fitRuns', () => {
+  const narrowI = { path: 'fonts/narrow-i.otf', advance: (t: string) => [...t].reduce((w, c) => w + (c === 'i' ? 0.25 : 0.5), 0) };
+  const mono = { path: 'fonts/mono.ttf', advance: (t: string) => [...t].length * 0.6 };
+  const fit = fitRuns([narrowI, mono]);
 
   test('measures in the face closest to the real width and gives justification slack to the spaces', () => {
-    expect(edges({ text: 'mi i', x: 0, y: 0, w: 17, h: 10 })).toEqual([0, 5, 7.5, 14.5, 17]);
+    expect(fit({ text: 'mi i', x: 0, y: 0, w: 17, h: 10 })).toEqual({ face: 'fonts/narrow-i.otf', spacing: 2, scale: 1, edges: [0, 5, 7.5, 14.5, 17] });
   });
 
   test('scales a run without spaces', () => {
-    expect(edges({ text: 'mi', x: 0, y: 0, w: 15, h: 10 })).toEqual([0, 7.5, 15]);
+    expect(fit({ text: 'mi', x: 0, y: 0, w: 15, h: 10 })).toEqual({ face: 'fonts/mono.ttf', spacing: 0, scale: 1.25, edges: [0, 7.5, 15] });
+  });
+
+  test('prefers a face whose spaces stretch to one whose spaces would shrink, though its width is further off', () => {
+    const regular = { path: 'fonts/regular.otf', advance: (t: string) => [...t].length * 0.5 };
+    const bold = { path: 'fonts/bold.otf', advance: (t: string) => [...t].length * 0.6 };
+    expect(fitRuns([bold, regular])({ text: 'aaaa aaaa', x: 0, y: 0, w: 50, h: 10 }).face).toBe('fonts/regular.otf');
+  });
+
+  test('measures a word whole, so its kerning counts, and shares that width among its characters', () => {
+    const kerned = { path: 'fonts/kerned.otf', advance: (t: string) => (t === 'AV' ? 1.6 : [...t].length) };
+    expect(fitRuns([kerned])({ text: 'AV A', x: 0, y: 0, w: 36, h: 10 }).edges).toEqual([0, 8, 16, 26, 36]);
+  });
+
+  test('gives a trailing space no width, since the run ends at its last letter', () => {
+    const regular = { path: 'fonts/regular.otf', advance: (t: string) => [...t].length * 0.5 };
+    expect(fitRuns([regular])({ text: 'ab c ', x: 0, y: 0, w: 20, h: 10 }).edges).toEqual([0, 5, 10, 15, 20, 20]);
+  });
+
+  test('with no face to measure in, spreads the characters evenly in the monospace fallback', () => {
+    expect(fitRuns([])({ text: 'ab', x: 4, y: 0, w: 10, h: 10 })).toEqual({ face: null, spacing: 0, scale: 10 / (2 * (1233 / 2048) * 10), edges: [4, 9, 14] });
   });
 });

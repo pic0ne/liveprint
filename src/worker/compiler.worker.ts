@@ -2,7 +2,7 @@ import { CompileFormatEnum, createTypstFontBuilder, type IncrementalServer, type
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import type { MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
-import { type Advance, fittedEdges } from '../linking/edges';
+import { type Advance, fitRuns } from '../linking/edges';
 import { type ImageMark, imageBoxes } from '../linking/imageBoxes';
 import { type Bytes, type FromWorker, type LinkRequest, type Rev, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
@@ -75,8 +75,8 @@ let applied: PageSettings | null = null;
 /** The newest settings asked for, which wait while their fonts download. */
 let wanted: PageSettings | null = null;
 
-/** The faces a fresh session in this theme would measure with, so fonts of themes visited before cannot be picked. */
-const edgesFor = (theme: ThemeId) => fittedEdges([...FONT_FILES, ...THEMES[theme].fonts].flatMap((path) => faces.get(path) ?? []));
+/** Fits runs in the faces the theme sets text in that the browser could load. */
+const fitterFor = (theme: ThemeId) => fitRuns(THEMES[theme].text.flatMap((path) => (faces.has(path) ? [{ path, advance: faces.get(path)! }] : [])));
 
 function addFaces(paths: string[], advances: (Advance | null)[]): void {
   paths.forEach((path, i) => {
@@ -168,7 +168,7 @@ async function compileEdit({ rev, markdown }: Edit): Promise<void> {
     }
     raster.merge(result);
     const { shownImages } = converted;
-    linker.setDocument(converted.pieces, edgesFor(settings.theme), async () => (shownImages.length > 0 ? imageBoxes(await queryMarks(), shownImages) : []));
+    linker.setDocument(converted.pieces, fitterFor(settings.theme), async () => (shownImages.length > 0 ? imageBoxes(await queryMarks(), shownImages) : []));
     const mathErrors = converted.typedMath.map((call) => rejected.get(call)!);
     shown = { rev, settings, images: converted.images, mathErrors, convertMs, compileMs };
     await drawNext(shown, false);
@@ -228,6 +228,8 @@ async function answerLink(request: LinkRequest): Promise<void> {
       post({ kind: 'runs', id: request.id, pages: linked?.pages ?? [] });
       break;
   }
+  const text = linked ? linker.textChanges(linked) : [];
+  if (text.length > 0) post({ kind: 'text', pages: text });
 }
 
 function applyImages(updates: ImageUpdate[]): void {

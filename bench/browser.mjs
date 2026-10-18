@@ -45,7 +45,7 @@ const shot = async (name) => {
 const blankVisible = `(() => {
   const pages = document.getElementById('pages');
   const top = pages.scrollTop, bottom = top + pages.clientHeight;
-  return [...pages.querySelectorAll('canvas')].filter((c) => !c.hasAttribute('width') && c.offsetTop < bottom && c.offsetTop + c.offsetHeight > top).length;
+  return [...pages.querySelectorAll('canvas')].filter((c) => !c.hasAttribute('width') && c.parentElement.offsetTop < bottom && c.parentElement.offsetTop + c.offsetHeight > top).length;
 })()`;
 
 // Each spot starts from the sample: leaving the typed page passes its beforeunload warning, and the document it

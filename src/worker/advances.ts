@@ -5,6 +5,7 @@ let count = 0;
 
 /**
  * Each font's advance widths per pt of font size, measured on a canvas in the faces typst lays the pages out with.
+ * The canvas kerns and forms ligatures, as typst does.
  * Null for a font the browser will not load: Chrome's sanitizer rejects the CFF of NewCM10 Regular and Italic,
  * which typst reads fine.
  */
@@ -17,11 +18,11 @@ export async function measureFaces(fonts: Uint8Array[], into: FontFaceSet): Prom
     into.add(face);
     const font = `100px "${face.family}"`;
     const widths = new Map<string, number>();
-    return (char) => {
-      let width = widths.get(char);
+    return (text) => {
+      let width = widths.get(text);
       if (width === undefined) {
         context.font = font;
-        widths.set(char, (width = context.measureText(char).width / 100));
+        widths.set(text, (width = context.measureText(text).width / 100));
       }
       return width;
     };

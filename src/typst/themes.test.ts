@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import { preludeFor } from './themes';
+import { FONT_FILES } from './files';
+import { preludeFor, THEMES } from './themes';
 
 test('preludeFor sets the page after the shared preamble and before the theme', () => {
   const lines = preludeFor({ paper: 'us-letter', margins: 'wide', theme: 'modern' }).split('\n');
@@ -13,4 +14,9 @@ test('preludeFor writes each margin in millimetres', () => {
   const pageLine = (margins: 'narrow' | 'normal') => preludeFor({ paper: 'a4', margins, theme: 'book' }).split('\n').find((l) => l.startsWith('#set page(paper'));
   expect(pageLine('narrow')).toBe('#set page(paper: "a4", margin: 18mm)');
   expect(pageLine('normal')).toBe('#set page(paper: "a4", margin: 25mm)');
+});
+
+test.each(Object.values(THEMES))('every face $label measures text in is loaded at boot or with the theme', ({ text, fonts }) => {
+  const loaded = new Set<string>([...FONT_FILES, ...fonts]);
+  expect(text.filter((path) => !loaded.has(path))).toEqual([]);
 });

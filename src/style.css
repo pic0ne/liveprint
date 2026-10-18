@@ -26,6 +26,8 @@
   --panel: #ffffff;
   --segment-on: #ffffff;
   --paper: #ffffff;
+  /* On the white page in both schemes. */
+  --page-selection: rgb(37 99 208 / 0.3);
   color-scheme: light;
 }
 
@@ -328,15 +330,46 @@ button:focus-visible {
   padding: 32px;
 }
 
-.pages canvas {
+.page {
+  position: relative;
+  background: var(--paper);
+}
+
+.page + .page {
+  margin-top: 16px;
+}
+
+.page canvas {
   display: block;
   width: 100%;
-  background: var(--paper);
+  height: 100%;
+}
+
+/* The printed text, transparent, where the reader selects and finds it. Fonts and sizes come from the worker's fit. */
+.text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  contain: strict;
+  line-height: 1;
   cursor: text;
 }
 
-.pages canvas + canvas {
-  margin-top: 16px;
+/* Laid out and painted only while the reader works in the preview: over the page bitmaps they slow every keystroke. */
+.pages:not(.reading) .text-layer {
+  display: none;
+}
+
+.text-layer span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0 0;
+}
+
+.text-layer ::selection {
+  background: var(--page-selection);
 }
 
 .overlay {
@@ -366,6 +399,7 @@ button:focus-visible {
 /* Where the editor's cursor renders. Laid over the page, never in the way of a click. */
 .cursor-mark {
   position: absolute;
+  z-index: 1;
   pointer-events: none;
 }
 

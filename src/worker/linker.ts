@@ -1,8 +1,9 @@
 import type { TextPiece } from '../convert/toTypst';
-import type { Edges } from '../linking/edges';
+import type { Fit, Fitter } from '../linking/edges';
 import { type ImageBox, imageAt, imageOf } from '../linking/imageBoxes';
 import { parseRuns, type Run } from '../linking/runs';
 import { type PageRuns, SourceIndex, type Spot } from '../linking/sourceIndex';
+import type { TextPage } from '../protocol';
 import type { PageRaster } from './raster';
 
 export interface Linked {
@@ -29,33 +30,53 @@ export function spotOf({ index, pages, images }: Linked, offset: number): Spot |
 
 /**
  * The source index of the document the raster holds, built when a linking request first needs it after a compile.
- * A page whose typst.ts cache key is unchanged keeps its runs and their measured edges, so typing on one page
- * re-reads only that page's text layer.
+ * A page whose typst.ts cache key is unchanged keeps its runs and their fits, so typing on one page re-reads only
+ * that page's text layer.
  */
 export class Linker {
   readonly #raster: PageRaster;
-  /** A run belongs to one page's cache key, and so to one theme, so its edges are measured once. */
-  readonly #measured = new WeakMap<Run, number[]>();
-  #edges: Edges = () => [];
+  /** A run belongs to one page's cache key, and so to one theme, so it is fitted once. */
+  readonly #fits = new WeakMap<Run, Fit>();
+  #fitter: Fitter = () => ({ face: null, spacing: 0, scale: 1, edges: [] });
   #pieces: TextPiece[] = [];
   #images: () => Promise<ImageBox[]> = async () => [];
   #linked: Linked | null = null;
   #runs = new Map<string, Run[]>();
+  /** Each page's runs as the preview's text layer last got them. */
+  #posted: Run[][] = [];
 
   constructor(raster: PageRaster) {
     this.#raster = raster;
   }
 
-  /** The Markdown text of the document just merged into the raster, how to measure its runs, and where its images are. */
-  setDocument(pieces: TextPiece[], edges: Edges, images: () => Promise<ImageBox[]>): void {
+  /** The Markdown text of the document just merged into the raster, how to fit its runs, and where its images are. */
+  setDocument(pieces: TextPiece[], fitter: Fitter, images: () => Promise<ImageBox[]>): void {
     this.#pieces = pieces;
     this.#images = images;
-    this.#edges = (run) => {
-      let out = this.#measured.get(run);
-      if (!out) this.#measured.set(run, (out = edges(run)));
-      return out;
-    };
+    this.#fitter = fitter;
     this.#linked = null;
+  }
+
+  #fit(run: Run): Fit {
+    let fit = this.#fits.get(run);
+    if (!fit) this.#fits.set(run, (fit = this.#fitter(run)));
+    return fit;
+  }
+
+  #layerFit(run: Run): Omit<Fit, 'edges'> {
+    const { face, spacing, scale } = this.#fit(run);
+    return { face, spacing, scale };
+  }
+
+  /** The pages whose runs changed since the last call, set out for the preview's text layer. */
+  textChanges({ pages }: Linked): TextPage[] {
+    const changed = pages.flatMap(({ width, height, runs }, index) =>
+      runs === this.#posted[index]
+        ? []
+        : [{ index, width, height, runs: runs.map((run) => ({ ...run, ...this.#layerFit(run) })) }],
+    );
+    this.#posted = pages.map((page) => page.runs);
+    return changed;
   }
 
   async linked(): Promise<Linked> {
@@ -70,6 +91,6 @@ export class Linker {
     }
     this.#runs = runs;
     const images = await this.#images().catch(() => []);
-    return (this.#linked = { index: SourceIndex.build(pages, this.#pieces, this.#edges), pages, images });
+    return (this.#linked = { index: SourceIndex.build(pages, this.#pieces, (run) => this.#fit(run).edges), pages, images });
   }
 }

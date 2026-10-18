@@ -1,16 +1,19 @@
 // Two-way linking, end to end in headless Chrome against `vite preview` of dist/ (`npm run check:linking` builds it).
 // For words sampled from every page of src/sample.md: (a) clicking the word in the preview puts the editor cursor
-// inside it; (b) a cursor inside the word puts the preview's caret mark inside the word as printed. A word's box is
-// found in the page's pixels, as the ink between the gaps that separate its run's words, so neither the source
-// index nor its character measuring decides what counts as correct. A formula mitex rejects is added to the first
-// paragraph, and a word of its LaTeX, shown as typed, is sampled too.
+// inside it; (b) a cursor inside the word puts the preview's caret mark inside the word as printed; (c) a double
+// click on the word selects it in the preview's text layer, and the selection covers its ink (except an italic word
+// in Paper, whose face Chrome cannot load, where only the selected text is checked). A word's box is found in the
+// page's pixels, as the ink between the gaps that separate its run's words, so neither the source index nor its
+// character measuring decides what counts as correct. A formula mitex rejects is added to the first paragraph, and
+// a word of its LaTeX, shown as typed, is sampled too. Then (d) a drag across two lines selects and copies the text
+// between.
 // node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
 import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
 
 const WORDS_PER_PAGE = 4;
 const DPR = 2;
-const { values: args } = parseArgs({ options: { theme: { type: 'string', default: 'book' } } });
+const { values: args } = parseArgs({ options: { theme: { type: 'string', default: 'book' }, verbose: { type: 'boolean', default: false } } });
 const settings = { paper: 'a4', margins: 'normal', theme: args.theme };
 
 const { url, page, evaluate, close } = await launch();
@@ -118,6 +121,9 @@ const fences = [...markdown.matchAll(/^```[^\n]*\n[^]*?^```/gm)].map((m) => [m.i
 // Linking inside math is approximate by design, so a word printed from LaTeX, such as \exp, is not sampled.
 const maths = [...markdown.matchAll(/\$\$[^]*?\$\$|\$[^$\n]+\$/g)].map((m) => [m.index, m.index + m[0].length]);
 const typed = [markdown.indexOf(TYPED), markdown.indexOf(TYPED) + TYPED.length];
+const emphasis = [...markdown.matchAll(/(?<![*_\w])([*_])(?![*_\s])[^*_\n]+?\1(?![*_\w])/g)].map((m) => [m.index, m.index + m[0].length]);
+// Chrome cannot load New Computer Modern's italic, so in Paper an italic word is measured in the regular face.
+const italicUnmeasured = (offset) => args.theme === 'paper' && emphasis.some(([a, b]) => offset > a && offset < b);
 function kindAt(offset) {
   if (offset > typed[0] && offset < typed[1]) return 'typed math';
   const lineStart = markdown.lastIndexOf('\n', offset - 1) + 1;
@@ -135,13 +141,16 @@ const candidates = [];
 pages.forEach(({ height, runs }, p) =>
   runs.forEach((run, r) => {
     for (const word of wordBoxes(run.text, ink[p][r]) ?? []) {
-      const text = run.text.slice(word.from, word.to).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+      const token = run.text.slice(word.from, word.to);
+      const text = token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
       if (text.length < 3 || !isWord.test(text) || /[^\p{L}\p{N}]/u.test(text)) continue;
       const inMarkdown = occurrences(markdown, text);
       if (inMarkdown.length !== 1 || occurrences(allText, text).length !== 1) continue;
       const kind = kindAt(inMarkdown[0]);
       if (kind !== 'typed math' && maths.some(([from, to]) => inMarkdown[0] > from && inMarkdown[0] < to)) continue;
-      candidates.push({ text, page: p, run, box: word.box, scale: ink[p][r].scale, from: inMarkdown[0], kind, y: run.y / height });
+      // The ink box spans the whole token, so an edge where punctuation was stripped is not where the word ends.
+      const edges = { left: /^[\p{L}\p{N}]/u.test(token), right: /[\p{L}\p{N}]$/u.test(token) };
+      candidates.push({ text, page: p, run, box: word.box, edges, scale: ink[p][r].scale, from: inMarkdown[0], kind, y: run.y / height });
     }
   }),
 );
@@ -154,7 +163,7 @@ for (const m of markdown.matchAll(/\$[^$\n]+\$[\s,.;:]*([\p{L}\p{N}]+)((?:\s+[\p
   const { p, r, run, at, height } = holders[0];
   const word = wordBoxes(run.text, ink[p][r])?.find((w) => w.from === at);
   if (!word) continue;
-  candidates.push({ text: m[1], page: p, run, box: word.box, scale: ink[p][r].scale, from: m.indices[1][0], kind: 'after math', y: run.y / height });
+  candidates.push({ text: m[1], page: p, run, box: word.box, edges: { left: true, right: true }, scale: ink[p][r].scale, from: m.indices[1][0], kind: 'after math', y: run.y / height });
 }
 
 const picked = new Set();
@@ -180,7 +189,7 @@ for (const word of words) {
   const [boxLeft, boxRight] = [box[0] / bitmapWidth, box[1] / bitmapWidth];
   const midY = (run.y + run.h / 2) / pages[p].height;
 
-  await evaluate(`(() => { const c = document.querySelectorAll('#pages canvas')[${p}]; const s = document.getElementById('pages'); s.scrollTop = c.offsetTop + ${midY} * c.offsetHeight - s.clientHeight / 2; })()`);
+  await evaluate(`(() => { const c = document.querySelectorAll('#pages .page')[${p}]; const s = document.getElementById('pages'); s.scrollTop = c.offsetTop + ${midY} * c.offsetHeight - s.clientHeight / 2; })()`);
   await sleep(250);
   const rect = await canvasRect(p);
   const x = rect.left + ((boxLeft + boxRight) / 2) * rect.width;
@@ -206,6 +215,26 @@ for (const word of words) {
   })()`);
   const lineBand = [run.y / pages[p].height, (run.y + run.h) / pages[p].height];
   const caretOk = !mark.hidden && mark.left >= boxLeft && mark.right <= boxRight && mark.mid >= lineBand[0] && mark.mid <= lineBand[1];
+
+  // A double click selects the word in the text layer, and the selection covers its ink.
+  for (const clickCount of [1, 2]) {
+    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount });
+  }
+  await sleep(100);
+  const selected = await evaluate(`(() => {
+    const s = getSelection();
+    const r = s.rangeCount ? s.getRangeAt(0).getBoundingClientRect() : null;
+    const page = document.querySelectorAll('#pages .page')[${p}].getBoundingClientRect();
+    const span = s.anchorNode?.parentElement;
+    return { text: s.toString(), left: r && (r.left - page.left) / page.width, right: r && (r.right - page.left) / page.width, span: span && [span.getAttribute('style'), span.textContent] };
+  })()`);
+  const slack = (0.3 * run.h) / pages[p].width;
+  const selectedWord = selected.text.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  const selectOk =
+    selectedWord === text && (!word.edges.left || Math.abs(selected.left - boxLeft) <= slack) && (!word.edges.right || Math.abs(selected.right - boxRight) <= slack);
+  const selectNote = selectOk ? 'pass' : selectedWord === text && italicUnmeasured(from) ? 'italic, not measured' : null;
+  await evaluate('getSelection().removeAllRanges()');
+
   const pt = (fraction) => (fraction * pages[p].width).toFixed(1);
   results.push({
     word: text,
@@ -213,8 +242,45 @@ for (const word of words) {
     kind: word.kind,
     click: clickOk ? 'pass' : `FAIL ${JSON.stringify(markdown.slice(Math.max(0, clicked.h - 8), clicked.h))}|${JSON.stringify(markdown.slice(clicked.h, clicked.h + 8))}`,
     caret: caretOk ? 'pass' : `FAIL caret ${pt(mark.left)}-${pt(mark.right)} pt`,
+    select: selectNote ?? `FAIL ${JSON.stringify(selected.text)} ${pt(selected.left)}-${pt(selected.right)} pt${args.verbose ? ` in ${JSON.stringify(selected.span)}` : ''}`,
     box: `${pt(boxLeft)}-${pt(boxRight)} pt`,
   });
+}
+
+// A drag from one word to a word on a later line of the same page selects the text between, and copying it gives
+// the printed text with a line break where the line ends.
+const [from, to] = (() => {
+  for (const a of words) {
+    const plain = (w) => w.kind === 'text' || w.kind === 'list item' || w.kind === 'after math';
+    const b = words.find((w) => w.page === a.page && w.run.y > a.run.y + a.run.h && w.run.y < a.run.y + 8 * a.run.h && plain(w) && plain(a));
+    if (b) return [a, b];
+  }
+  return [];
+})();
+let dragged = { ok: false, text: 'no two words on nearby lines' };
+if (from && to) {
+  const p = from.page;
+  await evaluate(`(() => { const c = document.querySelectorAll('#pages .page')[${p}]; const s = document.getElementById('pages'); s.scrollTop = c.offsetTop + ${from.run.y / pages[p].height} * c.offsetHeight - s.clientHeight / 3; })()`);
+  await sleep(250);
+  const rect = await canvasRect(p);
+  const at = (word, edge) => ({
+    x: rect.left + ((word.box[edge] + (edge === 0 ? 1 : -1)) / (pages[p].width * word.scale)) * rect.width,
+    y: rect.top + ((word.run.y + word.run.h / 2) / pages[p].height) * rect.height,
+  });
+  const start = at(from, 0);
+  const end = at(to, 1);
+  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...start, button: 'left', clickCount: 1 });
+  for (let i = 1; i <= 8; i++) {
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: start.x + ((end.x - start.x) * i) / 8, y: start.y + ((end.y - start.y) * i) / 8, button: 'left', buttons: 1 });
+  }
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...end, button: 'left', clickCount: 1 });
+  await sleep(300);
+  const copied = await evaluate(`new Promise((resolve) => {
+    window.addEventListener('copy', (e) => resolve({ text: e.clipboardData.getData('text/plain'), headBefore: ${view}.state.selection.main.head }), { once: true });
+    document.execCommand('copy');
+  })`);
+  const bare = copied.text.replace(/[^\p{L}\p{N}]+$/u, '');
+  dragged = { ok: copied.text.startsWith(from.text) && bare.endsWith(to.text) && copied.text.includes('\n') && !/\n\n| \n|  /.test(copied.text), text: copied.text };
 }
 
 // One keystroke's worth of index rebuild: an edit and a locate posted together, so the locate waits for the edit's visible pages.
@@ -236,18 +302,19 @@ const timing = await evaluate(`new Promise((resolve) => {
 const sourcedMs = await evaluate('__sourced');
 await close();
 
-const columns = ['word', 'page', 'kind', 'box', 'click', 'caret'];
+const columns = ['word', 'page', 'kind', 'box', 'click', 'caret', 'select'];
 const width = Object.fromEntries(columns.map((c) => [c, Math.max(c.length, ...results.map((r) => String(r[c]).length))]));
 const row = (r) => columns.map((c) => String(r[c]).padEnd(width[c])).join('  ');
 console.log(`${args.theme}, A4, normal margins\n`);
 console.log(row(Object.fromEntries(columns.map((c) => [c, c]))));
 for (const r of results) console.log(row(r));
-const failed = results.filter((r) => r.click !== 'pass' || r.caret !== 'pass');
+const failed = results.filter((r) => r.click !== 'pass' || r.caret !== 'pass' || r.select.startsWith('FAIL'));
 const sorted = sourcedMs.sort((a, b) => a - b);
 console.log(`\n${results.length} words on ${new Set(results.map((r) => r.page)).size} of ${pages.length} pages, from ${candidates.length} unambiguous candidates; ${failed.length} failed`);
+console.log(`drag from ${JSON.stringify(from?.text)} to ${JSON.stringify(to?.text)} and copy: ${dragged.ok ? 'pass' : 'FAIL'} ${JSON.stringify(dragged.text)}`);
 console.log(`click to source offset: median ${sorted[sorted.length >> 1].toFixed(1)} ms, max ${sorted[sorted.length - 1].toFixed(1)} ms`);
 console.log(`edit then locate: visible pages after ${timing.drawn.toFixed(1)} ms, located after ${timing.located.toFixed(1)} ms`);
 const kinds = new Set(results.map((r) => r.kind));
 const missing = KINDS.filter((k) => !kinds.has(k));
 if (missing.length > 0) console.log(`no unambiguous word found of kind: ${missing.join(', ')}`);
-process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 ? 1 : 0);
+process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok ? 1 : 0);

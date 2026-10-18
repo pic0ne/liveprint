@@ -1,4 +1,6 @@
 import type { ImagePath } from './images';
+import type { Fit } from './linking/edges';
+import type { Run } from './linking/runs';
 import type { PageRuns, Spot } from './linking/sourceIndex';
 import type { PageSettings, ThemeId } from './settings';
 
@@ -44,6 +46,18 @@ export type LinkRequest =
   /** Every page's text runs, which the linking check measures words against. */
   | { kind: 'runs'; id: number };
 
+/** A run of a page's text, in pt, and how the preview sets it so that its characters fall where they print. */
+export interface LayerRun extends Run, Omit<Fit, 'edges'> {}
+
+/** The text of one page, for the preview's text layer, which lets the reader select and copy it. */
+export interface TextPage {
+  index: number;
+  /** In pt. */
+  width: number;
+  height: number;
+  runs: LayerRun[];
+}
+
 export type ToWorker =
   /** Sent before the first edit and on every change. */
   | { kind: 'settings'; settings: PageSettings }
@@ -84,4 +98,6 @@ export type FromWorker =
   | { kind: 'pdf'; rev: Rev; bytes: Bytes }
   | { kind: 'sourced'; id: number; offset: number | null }
   | { kind: 'located'; id: number; spot: Spot | null }
-  | { kind: 'runs'; id: number; pages: PageRuns[] };
+  | { kind: 'runs'; id: number; pages: PageRuns[] }
+  /** The pages whose text changed since the last of these, sent after a linking reply. */
+  | { kind: 'text'; pages: TextPage[] };

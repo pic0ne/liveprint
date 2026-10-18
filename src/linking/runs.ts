@@ -9,7 +9,7 @@ export interface Run {
 
 // The text layer sizes every run in a monospace fallback whose advance is DejaVu Sans Mono's 1233/2048 em, then
 // squeezes it with scaleX to the run's real width.
-const LAYER_ADVANCE = 1233 / 2048;
+export const LAYER_ADVANCE = 1233 / 2048;
 
 const TEXT_SPAN = /<span class="typst-content-text"[^>]*?style="([^"]*)"[^>]*>([^<]*)<\/span>/g;
 const ENTITY = /&(?:#(\d+)|#x([0-9a-f]+)|(lt|gt|amp|quot|apos|nbsp));/gi;
