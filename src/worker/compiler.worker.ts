@@ -3,7 +3,7 @@ import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import type { MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
 import { type Advance, fitRuns } from '../linking/edges';
-import { type ImageMark, imageBoxes } from '../linking/imageBoxes';
+import { type ImageBox, type ImageMark, imageBoxes } from '../linking/imageBoxes';
 import { type Bytes, type FromWorker, type LinkRequest, type Rev, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
 import { compileMarkdown, type Diagnostic } from '../typst/compileMarkdown';
@@ -14,7 +14,7 @@ import { measureFaces } from './advances';
 import { FontFiles } from './fonts';
 import { Linker, sourceAt, spotOf } from './linker';
 import { type Edit, type ImageUpdate, Mailbox } from './mailbox';
-import { drawSvgFrom, PageRaster } from './raster';
+import { drawSvgFrom, PageRaster, svgLongSide } from './raster';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -230,6 +230,20 @@ async function answerLink(request: LinkRequest): Promise<void> {
   }
   const text = linked ? linker.textChanges(linked) : [];
   if (text.length > 0) post({ kind: 'text', pages: text });
+  if (linked) askSharperSvgs(linked.images);
+}
+
+/**
+ * Asks the main thread to draw again each SVG image that prints larger than its drawing, at the size it prints, in
+ * steps of 256 pixels. It asks again after every compile until the new drawing is in; the main thread draws each
+ * size once. Typst prints the SVG itself; only the preview uses the drawing.
+ */
+function askSharperSvgs(boxes: ImageBox[]): void {
+  for (const { path, page, w, h } of boxes) {
+    const drawn = svgLongSide(path);
+    const prints = Math.max(w, h) * raster.pixelPerPt(page);
+    if (drawn !== null && prints > drawn * 1.05) post({ kind: 'svgWanted', path, longSide: Math.ceil(prints / 256) * 256 });
+  }
 }
 
 function applyImages(updates: ImageUpdate[]): void {

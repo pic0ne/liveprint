@@ -22,7 +22,7 @@ export interface Converted {
   /** Every local image the Markdown references, in document order, each once, whether it is available or not. */
   images: ImagePath[];
   /** The Markdown of each image shown, in document order, which is the order of their marks on the pages. */
-  shownImages: Span[];
+  shownImages: ShownImage[];
   /** The rejected formulas the Markdown has, shown as typed, in document order. */
   typedMath: MathCall[];
 }
@@ -31,6 +31,11 @@ export interface Converted {
 export interface Span {
   from: number;
   to: number;
+}
+
+/** The Markdown of an image the document shows, and the path of its file. */
+export interface ShownImage extends Span {
+  path: ImagePath;
 }
 
 /** A link reference definition's URL, and where it starts in the Markdown. */
@@ -45,7 +50,7 @@ interface Doc {
   pieces: TextPiece[];
   available: ReadonlySet<ImagePath>;
   images: Set<ImagePath>;
-  shownImages: Span[];
+  shownImages: ShownImage[];
   rejected: Pick<ReadonlySet<MathCall>, 'has'>;
   typedMath: MathCall[];
 }
@@ -288,7 +293,7 @@ function plain(node: SyntaxNode, doc: Doc, from: number, to: number): string {
 function image(node: SyntaxNode, doc: Doc, path: ImagePath): string {
   const [open, close] = named(node, 'LinkMark');
   const alt = softBreaks(plain(node, doc, open?.to ?? node.from, close?.from ?? node.to)).trim();
-  doc.shownImages.push({ from: node.from, to: node.to });
+  doc.shownImages.push({ from: node.from, to: node.to, path });
   return `linked-image(image(${str(`/images/${path}`)}, alt: ${str(alt)}))`;
 }
 

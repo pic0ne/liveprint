@@ -47,6 +47,7 @@ const WATCH_WORKER = `
       window.__worker = this;
       this.addEventListener('message', ({ data }) => {
         if (data.kind === 'located') __located++;
+        if (data.kind === 'svgWanted') (window.__svgWanted ??= []).push(data.longSide);
         if (data.kind !== 'pages') return;
         const pages = data.bitmaps.map(({ index, bitmap }) => {
           const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -534,6 +535,50 @@ await markFrames();
 await setText('# Inline\n\nWords before ![](image.png) words after.\n');
 await settled();
 await linkImage(await evaluate(`${view}.state.doc.toString()`), 'an inline image');
+
+console.log('\nAn SVG that prints larger than its first drawing');
+// A wide window with a wide preview prints the SVG's column about 2800 device pixels wide, past the first drawing's
+// 2048. The SVG is 40 black bars. An edge drawn at the size it prints has one pixel of grey between black and white,
+// 1.07 on average here; scaled up from the 2048-pixel drawing, it had 1.43.
+await page.send('Emulation.setDeviceMetricsOverride', { width: 2400, height: 1000, deviceScaleFactor: 2, mobile: false });
+await evaluate(`localStorage.setItem('liveprint.split', '0.2')`);
+await load();
+await setText('# Wide\n\n');
+await evaluate(`(() => {
+  const bars = Array.from({ length: 40 }, (_, i) => '<rect x="' + (i * 100 + 0.37) + '" width="50" height="400"/>').join('');
+  window.__images ??= {};
+  __images['bars.svg'] = new File(['<svg xmlns="http://www.w3.org/2000/svg" width="4000" height="400" viewBox="0 0 4000 400">' + bars + '</svg>'], 'bars.svg', { type: 'image/svg+xml' });
+})()`);
+await paste('bars.svg');
+await until('pasted', async () => (await state()).text.includes('bars.svg'));
+await settled();
+await sleep(1500);
+const edges = await evaluate(`(() => {
+  const canvas = document.querySelector('#pages canvas');
+  const ctx = Object.assign(document.createElement('canvas'), { width: canvas.width, height: canvas.height }).getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(canvas, 0, 0);
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const lum = (x, y) => { const i = (y * canvas.width + x) * 4; return 0.3 * data[i] + 0.59 * data[i + 1] + 0.11 * data[i + 2]; };
+  const rows = [];
+  for (let y = 0; y < canvas.height; y++) {
+    let dark = 0;
+    for (let x = 0; x < canvas.width; x += 4) if (lum(x, y) < 40) dark++;
+    if (dark > canvas.width / 16) rows.push(y);
+  }
+  const y = rows[rows.length >> 1];
+  let edges = 0, grey = 0, solid = null;
+  for (let x = 0; x < canvas.width; x++) {
+    const v = lum(x, y);
+    const now = v <= 40 ? 'dark' : v >= 215 ? 'light' : null;
+    if (now === null) grey++;
+    else if (solid !== null && now !== solid) edges++;
+    if (now !== null) solid = now;
+  }
+  return { width: canvas.width, rows: rows.length, edges, greyPerEdge: edges ? grey / edges : NaN, asked: window.__svgWanted ?? [] };
+})()`);
+check('a wide SVG is drawn again at the size it prints: its edges have about one pixel of grey', edges.rows > 100 && edges.edges >= 79 && edges.greyPerEdge < 1.25, edges);
+console.log(`     ${edges.edges} edges, ${edges.greyPerEdge.toFixed(2)} grey pixels per edge, in a page ${edges.width} pixels wide`);
+await page.send('Emulation.clearDeviceMetricsOverride');
 
 await close();
 rmSync(dir, { recursive: true, force: true });

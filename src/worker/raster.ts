@@ -12,6 +12,7 @@ scope.CanvasRenderingContext2D ??= OffscreenCanvasRenderingContext2D;
 const svgDrawings = new Map<string, ImageBitmap>();
 const svgTexts = new Map<ImagePath, string>();
 
+
 /** Keeps the main thread's drawing of the SVG image at `path` for the stand-in below, or forgets it for null bytes. */
 export function drawSvgFrom(path: ImagePath, bytes: Bytes | null, drawn: ImageBitmap | null): void {
   const old = svgTexts.get(path);
@@ -25,6 +26,14 @@ export function drawSvgFrom(path: ImagePath, bytes: Bytes | null, drawn: ImageBi
   svgTexts.set(path, text);
   svgDrawings.set(text, drawn);
 }
+
+/** The longer side of the drawing of the SVG image at `path`, in pixels, or null when it is not an SVG with one. */
+export function svgLongSide(path: ImagePath): number | null {
+  const text = svgTexts.get(path);
+  const drawing = text === undefined ? undefined : svgDrawings.get(text);
+  return drawing ? Math.max(drawing.width, drawing.height) : null;
+}
+
 
 // The renderer decodes PNG, JPEG, GIF and WebP with createImageBitmap, but an SVG it loads into `new Image()`, and
 // only when `self` passes for a Window; without one it panics. Workers have no Image and cannot decode SVG at all, so
@@ -98,6 +107,11 @@ export class PageRaster {
 
   setView(view: View): void {
     this.#plan.setView(view);
+  }
+
+  /** Device pixels per pt that page `index` is drawn at. */
+  pixelPerPt(index: number): number {
+    return (this.#plan.sizes[index]?.width ?? 0) / (this.#pages[index]?.width ?? 1);
   }
 
   get sizes(): PageSize[] {

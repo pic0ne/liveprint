@@ -129,9 +129,9 @@ describe('image marks', () => {
     expect(imageBoxes(marks.slice(1), shownImages)).toEqual([]);
     const round = (n: number) => Math.round(n * 10) / 10;
     expect(boxes.map(({ x, y, w, h, ...rest }) => ({ ...rest, x: round(x), y: round(y), w: round(w), h: round(h) }))).toEqual([
-      { from: 5, to: 19, page: 0, x: 94.2, y: 70.9, w: 192, h: 192 },
-      { from: 29, to: 44, page: 0, x: 201.6, y: 270, w: 192, h: 192 },
-      { from: 61, to: 74, page: 1, x: 70.9, y: 70.9, w: 453.5, h: 453.5 },
+      { from: 5, to: 19, path: 'small.png', page: 0, x: 94.2, y: 70.9, w: 192, h: 192 },
+      { from: 29, to: 44, path: 'small.png', page: 0, x: 201.6, y: 270, w: 192, h: 192 },
+      { from: 61, to: 74, path: 'wide.png', page: 1, x: 70.9, y: 70.9, w: 453.5, h: 453.5 },
     ]);
   });
 });

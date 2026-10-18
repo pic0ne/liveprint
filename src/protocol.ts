@@ -96,6 +96,8 @@ export type FromWorker =
   /** A theme's fonts did not download or install. The preview stays in `showing`, and choosing the theme again retries. */
   | { kind: 'fontsFailed'; theme: ThemeId; showing: ThemeId; message: string }
   | { kind: 'pdf'; rev: Rev; bytes: Bytes }
+  /** The SVG image at `path` prints larger than its drawing: draw it `longSide` pixels along its longer side. */
+  | { kind: 'svgWanted'; path: ImagePath; longSide: number }
   | { kind: 'sourced'; id: number; offset: number | null }
   | { kind: 'located'; id: number; spot: Spot | null }
   | { kind: 'runs'; id: number; pages: PageRuns[] }

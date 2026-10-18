@@ -527,6 +527,9 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
     case 'text':
       pages.showText(data.pages);
       break;
+    case 'svgWanted':
+      void workerImages.sharpen(data.path, data.longSide).catch(() => {});
+      break;
     case 'located':
       if (data.id < spotShown) break;
       spotShown = data.id;

@@ -1,9 +1,11 @@
-import type { Span } from '../convert/toTypst';
+import type { ShownImage } from '../convert/toTypst';
+import type { ImagePath } from '../images';
 
-/** A shown image: the Markdown that names it, from `![` to its end, and its box on its page in pt. */
+/** A shown image: the Markdown that names it, from `![` to its end, its file, and its box on its page in pt. */
 export interface ImageBox {
   from: number;
   to: number;
+  path: ImagePath;
   page: number;
   x: number;
   y: number;
@@ -27,14 +29,14 @@ const pt = (length: string) => parseFloat(length);
  * Gives each shown image, in document order, the box its three marks describe: its height is between the last two,
  * and its width keeps its natural aspect ratio. None at all if the marks do not match the images one to one.
  */
-export function imageBoxes(marks: ImageMark[], shown: Span[]): ImageBox[] {
+export function imageBoxes(marks: ImageMark[], shown: ShownImage[]): ImageBox[] {
   if (marks.length !== shown.length * 3) return [];
-  return shown.flatMap(({ from, to }, k) => {
+  return shown.flatMap(({ from, to, path }, k) => {
     const [size, start, end] = marks.slice(k * 3, k * 3 + 3) as [ImageMark, ImageMark, ImageMark];
     if (!('size' in size) || !('at' in start) || !('at' in end) || start.at.page !== end.at.page) return [];
     const h = pt(end.at.y) - pt(start.at.y);
     const w = (h * pt(size.size.width)) / pt(size.size.height);
-    const box = { from, to, page: start.at.page - 1, x: pt(start.at.x), y: pt(start.at.y), w, h };
+    const box = { from, to, path, page: start.at.page - 1, x: pt(start.at.x), y: pt(start.at.y), w, h };
     return [box.x, box.y, w, h].every(Number.isFinite) && h > 0 ? [box] : [];
   });
 }

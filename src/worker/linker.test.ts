@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import type { ImagePath } from '../images';
 import { SourceIndex } from '../linking/sourceIndex';
 import { type Linked, sourceAt, spotOf } from './linker';
 
@@ -7,7 +8,7 @@ const pages = [{ width: 200, height: 400, runs }];
 const linked: Linked = {
   index: SourceIndex.build(pages, [{ from: 0, text: 'Before' }]),
   pages,
-  images: [{ from: 8, to: 22, page: 0, x: 50, y: 100, w: 100, h: 80 }],
+  images: [{ from: 8, to: 22, path: 'cat.png' as ImagePath, page: 0, x: 50, y: 100, w: 100, h: 80 }],
 };
 
 test('a click on an image puts the offset after its `![`, and anywhere else is text', () => {

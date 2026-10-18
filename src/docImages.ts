@@ -3,11 +3,13 @@ import type { Bytes, ToWorker } from './protocol';
 
 /** An SVG is drawn this many pixels along its longer side, enough for a column on a 2x display. */
 const SVG_LONG_SIDE = 2048;
+/** A sharper drawing the worker asks for stays within this many pixels, 64 MB of memory. */
+const SVG_MAX_PIXELS = 4096 * 4096;
 
 const isSvg = (path: ImagePath, blob: Blob) => blob.type === 'image/svg+xml' || /\.svg$/i.test(path);
 
-/** Draws an SVG for the worker, which cannot decode SVG. Null when the browser cannot either. */
-async function drawSvg(blob: Blob): Promise<ImageBitmap | null> {
+/** Draws an SVG for the worker, which cannot decode SVG, `longSide` pixels along its longer side. Null when the browser cannot either. */
+async function drawSvg(blob: Blob, longSide = SVG_LONG_SIDE): Promise<ImageBitmap | null> {
   const image = new Image();
   image.src = URL.createObjectURL(blob);
   try {
@@ -18,7 +20,7 @@ async function drawSvg(blob: Blob): Promise<ImageBitmap | null> {
     URL.revokeObjectURL(image.src);
   }
   const [width, height] = [image.naturalWidth || 300, image.naturalHeight || 150];
-  const scale = SVG_LONG_SIDE / Math.max(width, height);
+  const scale = Math.min(longSide / Math.max(width, height), Math.sqrt(SVG_MAX_PIXELS / (width * height)));
   const canvas = new OffscreenCanvas(Math.round(width * scale), Math.round(height * scale));
   canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height);
   return canvas.transferToImageBitmap();
@@ -31,10 +33,31 @@ async function drawSvg(blob: Blob): Promise<ImageBitmap | null> {
 export class WorkerImages {
   readonly #send: (message: ToWorker, transfer: Transferable[]) => void;
   #sent: ReadonlyMap<ImagePath, Blob> = new Map();
+  /** The longer side each SVG image was last drawn again at, since its blob was sent. */
+  readonly #sharpened = new Map<ImagePath, number>();
   #queue = Promise.resolve();
 
   constructor(send: (message: ToWorker, transfer: Transferable[]) => void) {
     this.#send = send;
+  }
+
+  /**
+   * Draws the SVG image at `path` again, `longSide` pixels along its longer side, once per size, after any `show`
+   * before it. The worker gets it as a new image: the SVG with a comment naming the size, which typst.ts loads afresh,
+   * since it keeps its own copy of an image it has drawn.
+   */
+  sharpen(path: ImagePath, longSide: number): Promise<void> {
+    const sharpened = this.#queue.then(async () => {
+      const blob = this.#sent.get(path);
+      if (!blob || !isSvg(path, blob) || (this.#sharpened.get(path) ?? 0) >= longSide) return;
+      this.#sharpened.set(path, longSide);
+      const drawn = await drawSvg(blob, longSide);
+      if (!drawn) return;
+      const bytes = new Uint8Array(await new Blob([blob, `\n<!-- liveprint draws this at ${longSide} px -->\n`]).arrayBuffer()) as Bytes;
+      this.#send({ kind: 'image', path, bytes, drawn }, [bytes.buffer, drawn]);
+    });
+    this.#queue = sharpened.catch(() => {});
+    return sharpened;
   }
 
   show(images: ReadonlyMap<ImagePath, Blob>): Promise<void> {
@@ -51,6 +74,7 @@ export class WorkerImages {
     }
     for (const [path, blob] of images) {
       if (before.get(path) === blob) continue;
+      this.#sharpened.delete(path);
       const bytes = new Uint8Array(await blob.arrayBuffer()) as Bytes;
       const drawn = isSvg(path, blob) ? await drawSvg(blob) : null;
       this.#send({ kind: 'image', path, bytes, drawn }, drawn ? [bytes.buffer, drawn] : [bytes.buffer]);

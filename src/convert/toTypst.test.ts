@@ -100,7 +100,10 @@ describe('convert: images', () => {
   });
 
   test('lists the Markdown of each shown image in order, and no missing one', () => {
-    expect(convert('![a](cat.png) and ![](gone.png)\n\n![](figures/plot.svg)', available).shownImages).toEqual([{ from: 0, to: 13 }, { from: 33, to: 54 }]);
+    expect(convert('![a](cat.png) and ![](gone.png)\n\n![](figures/plot.svg)', available).shownImages).toEqual([
+      { from: 0, to: 13, path: 'cat.png' },
+      { from: 33, to: 54, path: 'figures/plot.svg' },
+    ]);
   });
 
   test('a shown image adds no text pieces; a frame shows its alt text or URL where they are typed', () => {
