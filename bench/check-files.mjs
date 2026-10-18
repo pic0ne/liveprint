@@ -104,7 +104,10 @@ const WATCH_WORKER = `
       };
     }
   };`;
+// Without FileSystemObserver the app checks the file on disk only when the tab comes back. Its reports arrive when
+// the browser chooses, and one reloading the file under Ctrl+O let the check type before the open replaced the text.
 const STUB_PICKERS = `
+  delete window.FileSystemObserver;
   window.__picker = { open: null, save: null, opened: 0, saved: 0, suggested: null };
   window.showOpenFilePicker = async () => {
     __picker.opened++;
