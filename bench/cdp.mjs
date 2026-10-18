@@ -42,12 +42,13 @@ async function connect(url) {
   return { send, listeners };
 }
 
-/** Starts `vite preview` of dist/ on a free port. */
+/** Starts `vite preview` of dist/ on a free port, at the path in LIVEPRINT_BASE (default `/`), as a host under a subpath would. */
 export async function preview() {
   const port = await freePort();
-  const server = spawn('node_modules/.bin/vite', ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { stdio: 'ignore' });
+  const base = process.env.LIVEPRINT_BASE ?? '/';
+  const server = spawn('node_modules/.bin/vite', ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--base', base], { stdio: 'ignore' });
   process.on('exit', () => server.kill());
-  const url = `http://127.0.0.1:${port}/`;
+  const url = `http://127.0.0.1:${port}${base}`;
   await until('vite preview', () => fetch(url).then((r) => r.ok));
   return { url, server };
 }

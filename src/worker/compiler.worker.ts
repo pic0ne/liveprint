@@ -4,7 +4,7 @@ import type { MathCall } from '../convert/toTypst';
 import type { ImagePath } from '../images';
 import { type Advance, fitRuns } from '../linking/edges';
 import { type ImageBox, type ImageMark, imageBoxes } from '../linking/imageBoxes';
-import { type Bytes, type FromWorker, type LinkRequest, type Rev, type ToWorker } from '../protocol';
+import { type Bytes, type FromWorker, type LinkRequest, type Rev, type Start, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
 import { compileMarkdown, type Diagnostic } from '../typst/compileMarkdown';
 import { createCompiler, MAIN_PATH } from '../typst/compiler';
@@ -20,8 +20,11 @@ declare const self: DedicatedWorkerGlobalScope;
 
 const post = (message: FromWorker, transfer: Transferable[] = []) => self.postMessage(message, transfer);
 
+let started: (publicUrl: URL) => void;
+const publicUrl = new Promise<URL>((resolve) => (started = resolve));
+
 const fetchBytes = async (path: string) => {
-  const response = await fetch(new URL(`${import.meta.env.BASE_URL}${path}`, self.location.origin));
+  const response = await fetch(new URL(path, await publicUrl));
   if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
   return new Uint8Array(await response.arrayBuffer());
 };
@@ -298,7 +301,8 @@ const mailbox = new Mailbox({
   raster: rasterNext,
   yieldToInbox,
 });
-self.onmessage = ({ data }: MessageEvent<ToWorker>) => {
+self.onmessage = ({ data }: MessageEvent<Start | ToWorker>) => {
+  if (data.kind === 'start') return started(new URL(data.publicUrl));
   // A theme's fonts start downloading when it is chosen, even while the worker boots or compiles.
   if (data.kind === 'settings') fonts.load(THEMES[data.settings.theme].fonts).catch(() => {});
   mailbox.receive(data);

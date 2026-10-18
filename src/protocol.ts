@@ -58,6 +58,12 @@ export interface TextPage {
   runs: LayerRun[];
 }
 
+/** The worker's first message: the URL public/ is served at. A relative base resolves against the page, which a worker cannot see. */
+export interface Start {
+  kind: 'start';
+  publicUrl: string;
+}
+
 export type ToWorker =
   /** Sent before the first edit and on every change. */
   | { kind: 'settings'; settings: PageSettings }

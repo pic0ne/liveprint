@@ -7,7 +7,7 @@ import { IMAGE_TYPE_NAMES, IMAGE_TYPES, type ImagePath } from './images';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
-import { type FromWorker, firstRev, nextRev, type Rev, type ToWorker } from './protocol';
+import { type FromWorker, firstRev, nextRev, type Rev, type Start, type ToWorker } from './protocol';
 import { claimDoc, keepDoc, keepImages } from './restore';
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
@@ -98,6 +98,7 @@ function drawOverlay(): void {
 drawOverlay();
 
 const worker = new Worker(new URL('./worker/compiler.worker.ts', import.meta.url), { type: 'module' });
+worker.postMessage({ kind: 'start', publicUrl: new URL(import.meta.env.BASE_URL, document.baseURI).href } satisfies Start);
 const send = (message: ToWorker) => worker.postMessage(message);
 const workerImages = new WorkerImages((message, transfer) => worker.postMessage(message, transfer));
 // Before the await below, so that nothing the worker sends while the last document is read goes unheard.

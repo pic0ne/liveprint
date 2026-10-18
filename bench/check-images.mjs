@@ -303,7 +303,7 @@ check('a reload restores the text and the image, shown in the first bitmap', s.t
 check('with no request for it', requested.length > 0 && !requested.some((u) => u.includes('image')), requested.filter((u) => u.includes('image')));
 
 await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
-await until('a page of the origin without the app', () => evaluate(`location.pathname === '/manifest.webmanifest'`));
+await until('a page of the origin without the app', () => evaluate(`location.pathname.endsWith('/manifest.webmanifest')`));
 await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
 await evaluate(`new Promise((resolve, reject) => {
   const request = indexedDB.open('liveprint', 1);
@@ -322,7 +322,7 @@ check('a version 1 record, from before images, restores', s.text === '# Before i
 await makeImage('image.png', 'magenta', 200, 100);
 const keptPng = (await imageBytes('image.png')).toString('base64');
 await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
-await until('a page of the origin without the app', () => evaluate(`location.pathname === '/manifest.webmanifest'`));
+await until('a page of the origin without the app', () => evaluate(`location.pathname.endsWith('/manifest.webmanifest')`));
 await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
 await evaluate(`new Promise((resolve, reject) => {
   const request = indexedDB.open('liveprint', 2);
