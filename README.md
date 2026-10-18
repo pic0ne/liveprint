@@ -7,6 +7,7 @@ A Markdown editor that typesets as you type. [Typst](https://typst.app) compiles
 ## Features
 
 - Click a word or an image in the preview to move the cursor to its Markdown. Moving the cursor marks the same place in the preview.
+- Select and copy text in the preview, as in a PDF viewer.
 - Write LaTeX math between `$` signs. An incomplete formula shows as typed while the rest of the page keeps updating.
 - Choose the Book, Paper, or Modern theme, A4 or US Letter, and narrow, normal, or wide margins. The choice applies to the preview and the PDF.
 - Open and save `.md` files on disk. Pasted images are saved beside the file, as VS Code does.
@@ -39,10 +40,11 @@ npm test                # run the unit tests
 npm run check:linking   # click in the preview and follow the cursor, in each theme
 npm run check:files     # open, save, restore, and drop files
 npm run check:images    # paste, drop, save, and link images
+npm run check:browsers  # run the main paths in Chrome, Firefox, and WebKit
 npm run bench:browser   # measure keystroke-to-preview latency
 ```
 
-The `check:` and `bench:` scripts drive headless Chrome over the DevTools protocol. Only Chrome is tested. Firefox and Safari open and save through file dialogs and downloads instead of the File System Access API.
+Most `check:` and `bench:` scripts drive headless Chrome over the DevTools protocol. `check:browsers` uses Playwright's Firefox and WebKit builds, which `npx playwright-core install firefox webkit` downloads. Firefox and Safari open and save through file dialogs and downloads instead of the File System Access API.
 
 ## License
 
