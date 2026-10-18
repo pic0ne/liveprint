@@ -43,11 +43,15 @@ The text layer gives only where a run starts and how wide it is. To place each c
 
 Inside a formula, linking pairs each printed letter or digit with the LaTeX that prints it. The converter lists the formula's letters and digits, operator names such as `\sin`, and Greek letters such as `\alpha`. Any other symbol, such as an arrow, takes its share of the LaTeX between its neighbours.
 
+Footnotes and table of contents entries print out of the Markdown's order: a footnote at the foot of its page, an entry before its heading. The diff needs both texts in order, so the converter marks their pieces as asides, which it leaves out. A second diff pairs the asides with the printed characters the first left unpaired. A click on footnote text then goes to its definition and a click on an entry to its heading, while a cursor in a heading still marks the heading in the text.
+
 The worker answers linking requests after it posts the edited page and before it draws off-screen pages, so linking does not change keystroke latency. A click gets its Markdown offset back in about 8 ms.
 
 ### Selecting text
 
 Drag across the preview to select text, or double-click a word, and copy it with **Ctrl+C**. Each page has its text layer as transparent HTML over its canvas, as in a PDF viewer, and the browser does the selecting. Each run is set in the font the worker fitted it to, so a selection covers its printed letters.
+
+A block behind the runs covers each layer. Without it, a drag passing between two lines was over the layer itself, and next to a small superscript such as a footnote number Chrome took that for a new start, so the selection stopped growing.
 
 The text layers are hidden while you type in the editor, and show when the pointer moves in the preview or the editor loses focus. Kept visible, they added layout and paint to every redraw and produced main-thread tasks over 16 ms.
 
@@ -100,6 +104,14 @@ The printed title and authors link both ways, like body text. A date printed in 
 From page 2 on, each theme prints the title in a running header, or the date when there is no title: Book in italics, Paper in small capitals, and Modern with the title on the left and the date on the right. Page 1 is the title page and has no header. Front matter can only open a document, so the title block is always on page 1. Page numbers stay in the footer, as each theme had them.
 
 The header has no setting of its own. A document has one when its front matter gives a title or a date, so the document decides, while page settings belong to the browser and apply to every document. The header is generated text, so it has no Markdown to link to.
+
+## Footnotes and contents
+
+`[^label]` refers to a footnote whose text a `[^label]: …` line gives, anywhere in the document, as on GitHub. Later lines of the same footnote are indented four spaces. Each footnote prints at the foot of the page that refers to it first, and later references repeat its number. A reference to a footnote that has no definition shows as typed.
+
+A `[[toc]]` line prints a table of contents of the headings to level 3, with their page numbers, where the line is. A line rather than a front matter key lets the writer place it, after an introduction for example, and a click on the **Contents** title lands on that line.
+
+Footnote text and contents entries link both ways, as the linking section describes. A footnote first referred to in a heading prints again at its next reference: the table of contents prints the heading a second time, and Typst lets a footnote's label occur only once.
 
 ## Files
 
