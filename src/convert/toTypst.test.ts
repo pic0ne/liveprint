@@ -152,8 +152,11 @@ const pieceCases: [string, string, TextPiece[]][] = [
     { from: 1, text: 'te' }, { from: 4, text: 'x' }, { from: 6, text: 't' }, { from: 18, text: ' ' }, { from: 20, text: 'http://v' },
   ]],
   ['an unresolved reference shows as typed', '[Nope]', [{ from: 0, text: '[Nope]' }]],
-  ['math and list markers show nothing', '- [x] a $x^2$ b\n1. c', [
-    { from: 5, text: ' a ' }, { from: 13, text: ' b' }, { from: 19, text: 'c' },
+  ['list markers show nothing, and a formula shows the letters and digits it prints', '- [x] a $x^2$ b\n1. c', [
+    { from: 5, text: ' a ' }, { from: 9, text: 'x' }, { from: 11, text: '2' }, { from: 13, text: ' b' }, { from: 19, text: 'c' },
+  ]],
+  ['a formula: operator names, Greek letters as their symbol, no command names or environment names', '$\\sin \\alpha + \\frac{a}{b_1}$ $$\\begin{pmatrix} x \\end{pmatrix}$$', [
+    { from: 2, text: 'sin' }, { from: 6, text: 'α', symbol: true }, { from: 21, text: 'a' }, { from: 24, text: 'b' }, { from: 26, text: '1' }, { from: 29, text: ' ' }, { from: 48, text: 'x' },
   ]],
   ['heading markers and emphasis marks show nothing', '## T *e*', [{ from: 2, text: ' T ' }, { from: 6, text: 'e' }]],
 ];
@@ -166,7 +169,8 @@ describe('convert: text pieces', () => {
 
 test('the sample\'s pieces run forward through the Markdown and copy it', () => {
   const { pieces } = convert(sample);
-  const out = pieces.filter((p, i) => sample.slice(p.from, p.from + p.text.length) !== p.text || (i > 0 && p.from < pieces[i - 1]!.from + pieces[i - 1]!.text.length));
+  const copies = (p: TextPiece) => p.symbol || sample.slice(p.from, p.from + p.text.length) === p.text;
+  const out = pieces.filter((p, i) => !copies(p) || (i > 0 && p.from < pieces[i - 1]!.from + pieces[i - 1]!.text.length));
   expect(pieces.length).toBeGreaterThan(200);
   expect(out).toEqual([]);
 });

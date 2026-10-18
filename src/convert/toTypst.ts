@@ -1,5 +1,6 @@
 import { type ImagePath, imagePath } from '../images';
 import { markdownParser } from '../markdown/parser';
+import { mathPieces } from './mathText';
 
 type SyntaxNode = ReturnType<typeof markdownParser.parse>['topNode'];
 
@@ -10,6 +11,8 @@ export type MathCall = string & { readonly __brand: 'MathCall' };
 export interface TextPiece {
   from: number;
   text: string;
+  /** `text` is the symbol a LaTeX command at `from` prints, such as α for `\alpha`, not a copy of the Markdown. */
+  symbol?: true;
 }
 
 export interface Converted {
@@ -234,7 +237,10 @@ const math: Emit = (node, doc) => {
   const tex = joinChildren(node, doc, 'MathText');
   const call = `${marks[0] === '$$' ? 'mitex' : 'mi'}(${str(block ? tex.trim() : tex)})` as MathCall;
   const closed = marks.length === 2;
-  if (closed && !doc.rejected.has(call)) return `#${call}`;
+  if (closed && !doc.rejected.has(call)) {
+    for (const part of named(node, 'MathText')) doc.pieces.push(...mathPieces(slice(part, doc), part.from));
+    return `#${call}`;
+  }
   if (closed) doc.typedMath.push(call);
   const typed = `${marks[0]}${shownChildren(node, doc, 'MathText')}${marks[1] ?? ''}`;
   return `#typed-math(raw(${str(block ? typed : typed.replace(/\n/g, ' '))}${block ? ', block: true' : ''}))`;

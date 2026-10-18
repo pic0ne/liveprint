@@ -5,8 +5,8 @@
 // in Paper, whose face Chrome cannot load, where only the selected text is checked). A word's box is found in the
 // page's pixels, as the ink between the gaps that separate its run's words, so neither the source index nor its
 // character measuring decides what counts as correct. A formula mitex rejects is added to the first paragraph, and
-// a word of its LaTeX, shown as typed, is sampled too. Then (d) a drag across two lines selects and copies the text
-// between.
+// a word of its LaTeX, shown as typed, is sampled too. Then (d) a click on each symbol of a formula puts the cursor
+// in that symbol's LaTeX, and (e) a drag across two lines selects and copies the text between.
 // node bench/check-linking.mjs [--theme book] sets A4, normal margins and the theme with the message the UI sends.
 import { parseArgs } from 'node:util';
 import { launch, sleep, until } from './cdp.mjs';
@@ -49,9 +49,12 @@ await until(`every page drawn in ${args.theme}`, () =>
 );
 const view = `document.querySelector('.cm-content').cmTile.view`;
 const TYPED = '$\\foo zeugma$';
+// Its own paragraph, so it prints on a line of its own, and quads part its symbols into clusters of ink.
+const FORMULA = '$a \\quad \\beta \\quad \\sin \\quad 7 \\quad \\mathbb{R}$';
+const SYMBOLS = ['a', '\\beta', '\\sin', '7', '\\mathbb{R}'];
 await evaluate(`(() => {
   __shown = null;
-  ${view}.dispatch({ changes: { from: ${view}.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.`)} } });
+  ${view}.dispatch({ changes: { from: ${view}.state.doc.line(3).to, insert: ${JSON.stringify(` A formula being typed, ${TYPED}, shows as typed.\n\n${FORMULA}`)} } });
 })()`);
 await until('the typed formula drawn', () => evaluate('__shown?.final'));
 await sleep(1000);
@@ -118,7 +121,7 @@ function wordBoxes(text, { spans }) {
 const isWord = /[\p{L}\p{N}]/u;
 const occurrences = (text, word) => [...text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, 'gu'))].map((m) => m.index);
 const fences = [...markdown.matchAll(/^```[^\n]*\n[^]*?^```/gm)].map((m) => [m.index, m.index + m[0].length]);
-// Linking inside math is approximate by design, so a word printed from LaTeX, such as \exp, is not sampled.
+// A word printed from LaTeX, such as \exp, is not sampled: the formula check below clicks symbols of a formula.
 const maths = [...markdown.matchAll(/\$\$[^]*?\$\$|\$[^$\n]+\$/g)].map((m) => [m.index, m.index + m[0].length]);
 const typed = [markdown.indexOf(TYPED), markdown.indexOf(TYPED) + TYPED.length];
 const emphasis = [...markdown.matchAll(/(?<![*_\w])([*_])(?![*_\s])[^*_\n]+?\1(?![*_\w])/g)].map((m) => [m.index, m.index + m[0].length]);
@@ -247,6 +250,59 @@ for (const word of words) {
   });
 }
 
+// A click on each symbol of FORMULA puts the cursor in that symbol's LaTeX. The symbols are found as clusters of ink
+// on the formula's line, which is the run that prints its beta.
+const formulaAt = markdown.indexOf(FORMULA);
+const symbolRanges = [];
+for (let at = formulaAt, k = 0; k < SYMBOLS.length; k++) {
+  const from = markdown.indexOf(SYMBOLS[k], at);
+  symbolRanges.push([from, from + SYMBOLS[k].length]);
+  at = from + SYMBOLS[k].length;
+}
+const formulaPage = pages.findIndex((p) => p.runs.some((r) => r.text.normalize('NFKD').includes('β')));
+const formulaRun = pages[formulaPage]?.runs.find((r) => r.text.normalize('NFKD').includes('β'));
+const formulaResults = [];
+if (formulaRun) {
+  const p = formulaPage;
+  await evaluate(`(() => { const c = document.querySelectorAll('#pages .page')[${p}]; const s = document.getElementById('pages'); s.scrollTop = c.offsetTop + ${formulaRun.y / pages[p].height} * c.offsetHeight - s.clientHeight / 2; })()`);
+  await sleep(250);
+  const clusters = await evaluate(`(() => {
+    const canvas = document.querySelectorAll('#pages canvas')[${p}];
+    const ctx = Object.assign(document.createElement('canvas'), { width: canvas.width, height: canvas.height }).getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvas, 0, 0);
+    const s = canvas.width / ${pages[p].width};
+    const [y0, y1] = [Math.floor(${formulaRun.y + formulaRun.h * 0.15} * s), Math.ceil(${formulaRun.y + formulaRun.h * 0.85} * s)];
+    const { data } = ctx.getImageData(0, y0, canvas.width, y1 - y0);
+    const spans = [];
+    for (let col = 0; col < canvas.width; col++) {
+      let dark = false;
+      for (let row = 0; row < y1 - y0 && !dark; row++) {
+        const i = (row * canvas.width + col) * 4;
+        dark = 0.3 * data[i] + 0.59 * data[i + 1] + 0.11 * data[i + 2] < 140;
+      }
+      const last = spans[spans.length - 1];
+      if (dark && last && col - last[1] < ${formulaRun.h * 0.4} * s) last[1] = col + 1;
+      else if (dark) spans.push([col, col + 1]);
+    }
+    return spans.map(([a, b]) => (a + b) / 2 / canvas.width);
+  })()`);
+  const rect = await canvasRect(p);
+  const y = rect.top + ((formulaRun.y + formulaRun.h / 2) / pages[p].height) * rect.height;
+  for (const [k, centre] of clusters.entries()) {
+    const before = await head();
+    const t0 = performance.now();
+    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: rect.left + centre * rect.width, y, button: 'left', clickCount: 1 });
+    const { h } = await until('cursor moved', async () => {
+      const h = await head();
+      return h !== before || performance.now() - t0 > 1000 ? { h } : null;
+    });
+    const [from, to] = symbolRanges[k] ?? [NaN, NaN];
+    formulaResults.push({ symbol: SYMBOLS[k] ?? '?', ok: h >= from && h <= to, at: markdown.slice(h - 4, h) + '|' + markdown.slice(h, h + 4) });
+    await evaluate(`${view}.dispatch({ selection: { anchor: 0 } })`);
+  }
+}
+const formulaOk = formulaResults.length === SYMBOLS.length && formulaResults.every((r) => r.ok);
+
 // A drag from one word to a word on a later line of the same page selects the text between, and copying it gives
 // the printed text with a line break where the line ends.
 const [from, to] = (() => {
@@ -311,10 +367,11 @@ for (const r of results) console.log(row(r));
 const failed = results.filter((r) => r.click !== 'pass' || r.caret !== 'pass' || r.select.startsWith('FAIL'));
 const sorted = sourcedMs.sort((a, b) => a - b);
 console.log(`\n${results.length} words on ${new Set(results.map((r) => r.page)).size} of ${pages.length} pages, from ${candidates.length} unambiguous candidates; ${failed.length} failed`);
+console.log(`clicks on the symbols of ${FORMULA}: ${formulaOk ? 'pass' : 'FAIL'} ${formulaResults.map((r) => `${r.symbol} ${r.ok ? 'ok' : `at ${JSON.stringify(r.at)}`}`).join(', ') || 'no formula line found'}`);
 console.log(`drag from ${JSON.stringify(from?.text)} to ${JSON.stringify(to?.text)} and copy: ${dragged.ok ? 'pass' : 'FAIL'} ${JSON.stringify(dragged.text)}`);
 console.log(`click to source offset: median ${sorted[sorted.length >> 1].toFixed(1)} ms, max ${sorted[sorted.length - 1].toFixed(1)} ms`);
 console.log(`edit then locate: visible pages after ${timing.drawn.toFixed(1)} ms, located after ${timing.located.toFixed(1)} ms`);
 const kinds = new Set(results.map((r) => r.kind));
 const missing = KINDS.filter((k) => !kinds.has(k));
 if (missing.length > 0) console.log(`no unambiguous word found of kind: ${missing.join(', ')}`);
-process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok ? 1 : 0);
+process.exit(failed.length > 0 || missing.length > 0 || results.length < 20 || !dragged.ok || !formulaOk ? 1 : 0);
