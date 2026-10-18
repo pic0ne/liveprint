@@ -109,6 +109,19 @@ async function load(how = () => page.send('Page.navigate', { url })) {
   await settled();
 }
 
+/**
+ * Runs `script` on a page of the origin with no app holding the database open. The service worker answers every
+ * navigation in its scope with the app, so it is bypassed.
+ */
+async function withoutApp(script) {
+  await page.send('Network.setBypassServiceWorker', { bypass: true });
+  await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
+  await until('a page of the origin without the app', () => evaluate(`location.pathname.endsWith('/manifest.webmanifest') && !document.querySelector('.cm-content')`));
+  await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
+  await evaluate(script);
+  await page.send('Network.setBypassServiceWorker', { bypass: false });
+}
+
 const setText = (text) =>
   evaluate(`(() => { const v = ${view}; v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: ${J(text)} }, selection: { anchor: ${text.length} } }); v.focus(); })()`);
 
@@ -302,10 +315,7 @@ first = await firstFrame();
 check('a reload restores the text and the image, shown in the first bitmap', s.text === '# Kept\n\n![](image.png)\n' && centredAt(first?.page, 'magenta', 200), { s, found: first?.page.found });
 check('with no request for it', requested.length > 0 && !requested.some((u) => u.includes('image')), requested.filter((u) => u.includes('image')));
 
-await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
-await until('a page of the origin without the app', () => evaluate(`location.pathname.endsWith('/manifest.webmanifest')`));
-await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
-await evaluate(`new Promise((resolve, reject) => {
+await withoutApp(`new Promise((resolve, reject) => {
   const request = indexedDB.open('liveprint', 1);
   request.onupgradeneeded = () => request.result.createObjectStore('doc');
   request.onsuccess = () => {
@@ -321,10 +331,7 @@ check('a version 1 record, from before images, restores', s.text === '# Before i
 
 await makeImage('image.png', 'magenta', 200, 100);
 const keptPng = (await imageBytes('image.png')).toString('base64');
-await page.send('Page.navigate', { url: `${url}manifest.webmanifest` });
-await until('a page of the origin without the app', () => evaluate(`location.pathname.endsWith('/manifest.webmanifest')`));
-await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'indexeddb' });
-await evaluate(`new Promise((resolve, reject) => {
+await withoutApp(`new Promise((resolve, reject) => {
   const request = indexedDB.open('liveprint', 2);
   request.onupgradeneeded = () => (request.result.createObjectStore('doc'), request.result.createObjectStore('images'));
   request.onsuccess = () => {
