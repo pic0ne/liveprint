@@ -239,7 +239,7 @@ Time from navigation to the first page, in headless Chrome, two runs per cell ex
 | Third and later | 0.99–1.01 s | 0.72–0.77 s | 0.72–0.80 s | 0.72–0.77 s |
 | Offline | fails | 0.75 s | fails | 0.75 s |
 
-The throttled runs add 40 ms of latency. The offline row is one load with the server stopped, so throttling does not apply to it. `vite preview` does not compress, so a first visit transfers 32.9 MB, where a host that gzips would send about 13 MB.
+The throttled runs add 40 ms of latency. The offline row is one load with the server stopped, so throttling does not apply to it. `vite preview` does not compress, so a first visit transfers 32.9 MB, where GitHub Pages, which compresses, sends 13.8 MB, as [Hosting](#hosting) measures.
 
 What these numbers mean:
 
@@ -269,6 +269,37 @@ The first run found two faults, both fixed:
 - In Firefox, after a reload in the Paper theme, the worker's `FontFace` for New Computer Modern Italic never finished loading. Measuring the theme's fonts never ended, so no page was drawn. A face that has not loaded within 3 s is now left unmeasured.
 
 Firefox empties the clipboard data of a paste event that a script makes, so there the check reads its image through the folder dialog instead. The other checks, and the linking accuracy that `check:linking` measures, run in Chrome only.
+
+## Hosting
+
+liveprint is served at <https://liveprint.picone.dev> from GitHub Pages. The build uses a relative base, `base: './'` in [`vite.config.ts`](../vite.config.ts), so one `dist/` works at a domain's root or under a path such as `/liveprint/`. The page sends the compile worker the URL that `public/` is served at, because a relative URL in the worker resolves against the worker's own script, not the page. Before that change, the worker fetched its fonts from the origin's root and failed under a path with an HTTP 404.
+
+The scripts that use [`bench/cdp.mjs`](../bench/cdp.mjs) take two variables. `LIVEPRINT_BASE=/liveprint/` serves `dist/` under that path instead of `/`. `LIVEPRINT_URL=https://liveprint.picone.dev/` uses the deployed site instead of `vite preview`. `check:files`, `check:themes`, `check:browsers` and `bench:load` pass under `/liveprint/`, and `check:browsers` and `check:files` pass against the deployed site.
+
+### CI and deploy
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push and pull request. One job runs `npm ci`, `npm test` and `npm run build`. Three more jobs run `check:themes`, `check:linking` and `check:browsers`, each on its own runner. On a push to `main`, the first job uploads `dist/`, and a deploy job publishes it with `actions/deploy-pages` once all four jobs pass. The custom domain is set in the repository's Pages settings, so the repository has no `CNAME` file.
+
+`check:files` and `check:images` are not in CI. On GitHub's runners each one hung once in 7 runs, at a different point each time, and neither hung in 22 runs on a desktop. One of the hangs was a fault in `check:images` itself, now fixed. The check opened `manifest.webmanifest` to get a page without the app, but the service worker answers every navigation with the app, which then raced the check for the database. The other hang is not explained. `bench/cdp.mjs` now stops a script when Chrome leaves a command unanswered for 120 s, and prints the command, so the next hang says where it happened.
+
+### What Pages sends
+
+Pages compresses each file itself, the compiler WebAssembly included, which goes out as 10.85 MB of its 28.3 MB. Every file gets `Cache-Control: max-age=600`, and Pages allows no other headers. That cost is small here, because after the first visit the service worker answers every request. The mitex `.tar.gz` arrives without `Content-Encoding`, which the worker already handles.
+
+Time from navigation to the first page on a first visit to the deployed site, in headless Chrome, with the HTTP cache and all site data cleared before each run. These runs used a home connection that downloaded the compiler at 70 to 140 Mbit/s:
+
+| Network | First page | On the wire | Runs |
+|---|---|---|---|
+| No throttling | 1.53–3.48 s, median 1.98 s | 13.8 MB | 5 |
+| 50 Mbit/s, 40 ms latency | 3.67–4.35 s | 13.85 MB | 3 |
+
+At 50 Mbit/s, the same first visit took 7.4 s against `vite preview` (see [Offline](#offline)), which sends 32.9 MB uncompressed. Compression halves it. The download is the limit: 13.85 MB takes at least 2.2 s at 50 Mbit/s, and the compiler was ready 2.55 s into the visit on the worker's clock. The slowest unthrottled run was the first one after the certificate was issued. A CDN that did not hold the files yet would explain it, but that is a guess. Later visits took 0.70 to 1.10 s with nothing on the wire.
+
+To measure it, run:
+
+```bash
+LIVEPRINT_URL=https://liveprint.picone.dev/ node bench/load.mjs --runs 5 --warm 2
+```
 
 ## Scripts
 
