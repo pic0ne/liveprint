@@ -75,6 +75,26 @@ A choice applies to the preview and to **Download .pdf**, and the browser keeps 
 
 Book uses the fonts that load at start-up. Paper (2.2 MB of fonts) and Modern (890 KB) download their fonts when you first choose them, and the preview stays in the previous theme until they arrive, about 200 ms over loopback. If the download fails, the preview stays in the previous theme, the menu goes back to it, and a line says what failed. Choosing the theme again retries.
 
+## Front matter
+
+A YAML block between `---` lines at the top of a document gives its title, authors and date:
+
+```yaml
+---
+title: A field guide to the printed page
+author: [Ada Byron, Robert Bringhurst]
+date: 2026-10-18
+---
+```
+
+Each theme prints them as a title block, and the PDF takes them as its title, author and creation date. `author` takes one name or a list, and other keys are ignored. The editor shows the block's rules and keys in the grey of other Markdown syntax.
+
+The block counts as front matter only when a `---` or `...` line closes it and every line between is one YAML could hold: a key, a list item, an indented line, a comment or a blank line. A rule at the top of a document, or front matter half typed, stays a rule and the text under it stays in the preview. liveprint reads the three keys with a small parser of its own instead of a YAML library.
+
+A `date` written as `YYYY-MM-DD`, with or without a time, is printed in the theme's format and becomes the PDF's date. Typst's `date` takes only a real day, so any other date, such as `Spring 2026` or `2026-02-30`, prints as written and leaves the PDF without a date, rather than with one the page does not show.
+
+The printed title and authors link both ways, like body text. A date printed in the theme's format is generated text, like a list number, so it has no Markdown to link to.
+
 ## Files
 
 **Open** (Ctrl+O) reads a Markdown file and **Save** (Ctrl+S) writes it back. **Shift+Ctrl+S**, or Shift-click on **Save**, saves under a new name. You can also drop a `.md`, `.markdown` or `.txt` file on the app, with its images. The bar shows the file's name, and **Edited** while the text differs from what was last opened or saved. **Download .pdf** names the PDF after the file.

@@ -11,6 +11,7 @@ It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 - Click a word or an image in the preview to move the cursor to its Markdown. Moving the cursor marks the same place in the preview.
 - Select and copy text in the preview, as in a PDF viewer.
 - Write LaTeX math between `$` signs. An incomplete formula shows as typed while the rest of the page keeps updating.
+- Start a document with YAML front matter. Its `title`, `author` and `date` print as a title block and fill in the PDF's details.
 - Choose the Book, Paper, or Modern theme, A4 or US Letter, and narrow, normal, or wide margins. The choice applies to the preview and the PDF.
 - Open and save `.md` files on disk. Pasted images are saved beside the file, as VS Code does.
 - Go back to a recent document from the menu beside Open. The browser keeps the 10 newest, unsaved text included.
