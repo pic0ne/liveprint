@@ -24,6 +24,9 @@
   --accent-hover: #1f54b3;
   --on-accent: #ffffff;
   --panel: #ffffff;
+  /* A row under the pointer or focus in a panel. The muted text on it keeps 4.5:1 in both schemes. */
+  --panel-hover: #efeff1;
+  --panel-muted: #6b6b73;
   --segment-on: #ffffff;
   --paper: #ffffff;
   /* On the white page in both schemes. */
@@ -52,6 +55,8 @@
     --accent-hover: #245cc0;
     --on-accent: #ffffff;
     --panel: #26262a;
+    --panel-hover: #323237;
+    --panel-muted: #9a9aa2;
     --segment-on: #46464d;
     color-scheme: dark;
   }
@@ -201,12 +206,35 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-.settings {
+.settings,
+.recent {
   position: relative;
 }
 
+/* Open and the button that lists the recent documents, joined as one control. */
+.recent {
+  display: flex;
+  gap: 1px;
+}
+
+.recent > #open {
+  border-radius: 6px 0 0 6px;
+}
+
+.recent-toggle {
+  display: grid;
+  place-items: center;
+  padding: 0 9px;
+  border-radius: 0 6px 6px 0;
+}
+
+.recent-toggle[aria-expanded='true'] {
+  background: var(--button-hover);
+}
+
 /* A menu over the page, the one thing here that casts a shadow. */
-.settings-panel {
+.settings-panel,
+.recent-panel {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -223,8 +251,85 @@ button:focus-visible {
     0 2px 6px rgb(0 0 0 / 0.08);
 }
 
-.settings-panel[hidden] {
+.settings-panel[hidden],
+.recent-panel[hidden] {
   display: none;
+}
+
+.recent-panel {
+  width: 360px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  gap: 2px;
+  padding: 4px;
+}
+
+.recent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  width: 100%;
+  height: auto;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+}
+
+.recent-row:hover,
+.recent-row:focus {
+  background: var(--panel-hover);
+}
+
+.recent-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.recent-row[aria-disabled='true'] {
+  cursor: default;
+}
+
+.recent-row[aria-disabled='true']:not(:focus):hover {
+  background: transparent;
+}
+
+.recent-name,
+.recent-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-row[aria-disabled='true'] .recent-name,
+.recent-when,
+.recent-preview,
+.recent-empty {
+  color: var(--panel-muted);
+}
+
+.recent-when,
+.recent-preview {
+  font-size: 12px;
+}
+
+.recent-when {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.recent-preview {
+  grid-column: 1 / -1;
+}
+
+.recent-preview:empty {
+  display: none;
+}
+
+.recent-empty {
+  margin: 0;
+  padding: 8px 10px;
+  outline: none;
 }
 
 .settings-panel fieldset {
@@ -537,11 +642,13 @@ button:focus-visible {
   }
 
   /* Anchored to the bar instead of the button, so it spans the screen less the gutters. */
-  .settings {
+  .settings,
+  .recent {
     position: static;
   }
 
-  .settings-panel {
+  .settings-panel,
+  .recent-panel {
     left: 16px;
     right: 16px;
     width: auto;

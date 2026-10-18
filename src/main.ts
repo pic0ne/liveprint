@@ -8,7 +8,9 @@ import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
 import { type FromWorker, firstRev, nextRev, type Rev, type Start, type ToWorker } from './protocol';
-import { claimDoc, keepDoc, keepImages } from './restore';
+import type { Recent } from './recent';
+import { RecentMenu } from './recentMenu';
+import { claimDoc, type DocId, keepDoc, keepImages, letGo, recentDocs, takeDoc } from './restore';
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
 import { SettingsMenu } from './settingsMenu';
@@ -165,6 +167,8 @@ const claimed = await restoring;
 /** A first visit shows the sample. A tab opened while every kept document is open in another starts empty. */
 const start: Doc = claimed?.doc ?? untitled(claimed && !claimed.first ? '' : sample);
 performance.mark('liveprint:restored');
+/** The record this tab keeps its document in, which opening a recent document changes. Null when none could be read. */
+let docId: DocId | null = claimed?.id ?? null;
 let file = start.file;
 let images = start.images;
 /** The local images the newest compile's Markdown references, which the bar's notice counts. */
@@ -239,69 +243,75 @@ async function lookInFolder(): Promise<void> {
 }
 
 // A write started as the page unloads can be aborted with it, so the copy is kept current all along instead: one
-// write at a time, and the newest document written as soon as the last one ends.
-let keeping = false;
-let keepAgain = false;
+// write at a time, and each record's newest document written as soon as the last write ends. Keyed by record, so
+// what was typed just before the tab moves to another record still lands in the one it left.
+const toKeep = new Map<DocId, Omit<Doc, 'images'>>();
+let keeping: Promise<void> | null = null;
 function keep(): void {
-  if (!claimed) return;
-  if (keeping) {
-    keepAgain = true;
-    return;
-  }
-  keeping = true;
-  keepDoc(claimed.id, { text: editor.state.doc.toString(), file })
-    .catch((error) => {
-      last.fileFailure = `Could not keep a copy of ${file.name} in this browser: ${message(error)}`;
+  if (!docId) return;
+  toKeep.set(docId, { text: editor.state.doc.toString(), file });
+  keeping ??= writeKept();
+}
+async function writeKept(): Promise<void> {
+  while (toKeep.size > 0) {
+    const [id, doc] = toKeep.entries().next().value!;
+    toKeep.delete(id);
+    await keepDoc(id, doc).catch((error) => {
+      last.fileFailure = `Could not keep a copy of ${doc.file.name} in this browser: ${message(error)}`;
       drawOverlay();
-    })
-    .finally(() => {
-      keeping = false;
-      if (keepAgain) {
-        keepAgain = false;
-        keep();
-      }
     });
+  }
+  keeping = null;
 }
 window.addEventListener('beforeunload', (e) => {
   if (isEdited(editor.state.doc.toString(), file)) e.preventDefault();
 });
 
-function changed(markdown: string): void {
+function compile(markdown: string): void {
   rev = nextRev(rev);
   send({ kind: 'edit', rev, markdown });
+}
+
+function changed(markdown: string): void {
+  compile(markdown);
   showFile(markdown);
   keep();
 }
 
 /** The worker gets the images before any edit that references them. */
-async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
+async function showImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   images = next;
   showNotice();
-  if (claimed) {
-    keepImages(claimed.id, next).catch((error) => {
+  await workerImages.show(next);
+}
+
+async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
+  if (docId) {
+    keepImages(docId, next).catch((error) => {
       last.fileFailure = `Could not keep the images of ${file.name} in this browser: ${message(error)}`;
       drawOverlay();
     });
   }
-  await workerImages.show(next);
+  await showImages(next);
 }
 
 /**
  * Shows `doc` in the editor at once, so a key pressed while its images go to the worker types into it, not into the
- * document it replaced. The worker gets the editor's text once it has the images.
+ * document it replaced. The worker gets the editor's text once it has the images. A document `kept` is the one just
+ * read from this tab's record, so nothing is written back, and its time of last edit stays.
  */
-async function openDoc(doc: Doc): Promise<void> {
+async function openDoc(doc: Doc, kept = false): Promise<void> {
   file = doc.file;
   showDiskChange(false);
   watchDisk();
   referenced = [];
   looked = new Set();
-  const shown = setImages(doc.images);
+  const shown = kept ? showImages(doc.images) : setImages(doc.images);
   load(doc.text);
   $('pages').scrollTop = 0;
   showFile(doc.text);
   await shown;
-  changed(editor.state.doc.toString());
+  (kept ? compile : changed)(editor.state.doc.toString());
 }
 
 /** Inserts `![](path)` for each image file at `at`, or over the selection. Other files are named in the failure line. */
@@ -352,6 +362,23 @@ const open = () =>
     const doc = await openFile();
     if (doc && mayDiscard()) await openDoc(doc);
   });
+
+/**
+ * Moves this tab onto another kept document. The one it leaves stays in its own record, unsaved text included, so
+ * nothing is discarded and nothing asks. Its file can have changed on disk while it was not open.
+ */
+const openRecent = ({ id, name }: Recent) =>
+  fileAction(`open ${name}`, async () => {
+    const left = docId;
+    if (!left) return;
+    const doc = await takeDoc(id);
+    if (!doc) throw new Error('it is open in another tab');
+    docId = id;
+    await openDoc(doc, true);
+    await keeping;
+    letGo(left);
+  }).then(checkDisk);
+new RecentMenu($('recent'), () => (docId ? recentDocs(docId) : Promise.resolve([])), (recent) => void openRecent(recent));
 
 const save = (as: boolean) =>
   fileAction(`save ${file.name}`, async () => {

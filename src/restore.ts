@@ -1,5 +1,6 @@
 import type { Doc, DocFile } from './doc';
 import type { ImagePath } from './images';
+import { listRecent, type Recent } from './recent';
 
 // The document in each tab, kept in IndexedDB so a reload, crash or discarded tab never loses typed text. One record
 // per tab; structured clone keeps the file and folder handles, so Save still writes to the same file after a reload.
@@ -8,7 +9,7 @@ import type { ImagePath } from './images';
 //
 // A tab finds its record again by the id in its sessionStorage, which survives a reload and reopening a closed tab.
 // While a tab is open it holds a Web Lock named after its record, so no other tab takes that record. A new tab takes
-// the newest record no open tab holds.
+// the newest record no open tab holds. A tab moves to another record by holding it and letting go of its own.
 const DB = 'liveprint';
 const DOCS = 'docs';
 const IMAGES = 'images';
@@ -127,20 +128,27 @@ async function read(id: DocId): Promise<Doc | null> {
   return parse(record, kept);
 }
 
-/** Every record's id, newest first. */
-async function newestFirst(): Promise<DocId[]> {
+/** Every record, unparsed. */
+async function records(): Promise<{ id: DocId; value: unknown }[]> {
   const transaction = (await open()).transaction(DOCS);
   const store = transaction.objectStore(DOCS);
-  const [ids, records] = await Promise.all([done(store.getAllKeys()), done(store.getAll())]);
-  return ids
-    .map((id, i) => ({ id: id as DocId, keptAt: (records[i] as Partial<Kept>)?.keptAt ?? 0 }))
-    .sort((a, b) => b.keptAt - a.keptAt)
-    .map(({ id }) => id);
+  const [ids, values] = await Promise.all([done(store.getAllKeys()), done(store.getAll())]);
+  return ids.map((id, i) => ({ id: id as DocId, value: values[i] }));
 }
 
+const keptAt = (value: unknown) => (value as Partial<Kept> | undefined)?.keptAt ?? 0;
+
+/** Every record's id, newest first. */
+async function newestFirst(): Promise<DocId[]> {
+  return (await records()).sort((a, b) => keptAt(b.value) - keptAt(a.value)).map(({ id }) => id);
+}
+
+/** How to let go of each record this tab holds. */
+const releases = new Map<DocId, () => void>();
+
 /**
- * Holds the lock on a record for as long as the tab is open, if no other tab holds it. True when this tab now holds
- * it. Without Web Locks, every record is free.
+ * Holds the lock on a record until `letGo`, if no other tab holds it. True when this tab now holds it. Without Web
+ * Locks, every record is free.
  */
 function hold(id: DocId): Promise<boolean> {
   if (!navigator.locks) return Promise.resolve(true);
@@ -148,10 +156,16 @@ function hold(id: DocId): Promise<boolean> {
     navigator.locks
       .request(lockName(id), { ifAvailable: true }, (lock) => {
         resolve(lock !== null);
-        return lock ? new Promise<never>(() => {}) : undefined;
+        return lock ? new Promise<void>((release) => releases.set(id, release)) : undefined;
       })
       .catch(() => resolve(false));
   });
+}
+
+/** Lets another tab take the record. */
+export function letGo(id: DocId): void {
+  releases.get(id)?.();
+  releases.delete(id);
 }
 
 /** Deletes these records, except the ones an open tab holds. */
@@ -212,6 +226,40 @@ export async function claimDoc(): Promise<Claimed> {
   const id = newId();
   await hold(id);
   return claim(id, null);
+}
+
+/** The kept documents other than `current`, newest first, each saying whether another tab holds it. */
+export async function recentDocs(current: DocId): Promise<Recent[]> {
+  const [all, locks] = await Promise.all([records(), navigator.locks?.query()]);
+  const held = new Set(locks?.held?.map((lock) => lock.name));
+  return listRecent(
+    all.flatMap(({ id, value }) => {
+      const doc = parse(value, new Map());
+      return doc ? [{ id, text: doc.text, file: doc.file, keptAt: keptAt(value), elsewhere: held.has(lockName(id)) }] : [];
+    }),
+    current,
+  );
+}
+
+/**
+ * Moves this tab onto the record `id`: holds it, reads it and names it in sessionStorage, so a reload comes back to
+ * it. Null when another tab holds it. The record the tab leaves stays held until `letGo`, so the writes still on their
+ * way to it land before another tab can take it.
+ */
+export async function takeDoc(id: DocId): Promise<Doc | null> {
+  if (!(await hold(id))) return null;
+  const doc = await read(id).catch((error: unknown) => {
+    letGo(id);
+    throw error;
+  });
+  if (!doc) {
+    letGo(id);
+    throw new Error('it is no longer kept in this browser');
+  }
+  try {
+    sessionStorage.setItem(SESSION_KEY, id);
+  } catch {}
+  return doc;
 }
 
 /** Keeps the text and where it lives. Images are kept apart, so typing never writes their bytes again. */

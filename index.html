@@ -32,7 +32,13 @@
           <button type="button" aria-expanded="false" aria-controls="settings-panel">A4 · Normal · Book</button>
           <div class="settings-panel" id="settings-panel" role="group" aria-label="Page settings" hidden></div>
         </div>
-        <button type="button" id="open" aria-keyshortcuts="Control+O Meta+O" title="Open (Ctrl+O)">Open</button>
+        <div class="recent" id="recent">
+          <button type="button" id="open" aria-keyshortcuts="Control+O Meta+O" title="Open (Ctrl+O)">Open</button>
+          <button type="button" class="recent-toggle" aria-label="Recent documents" title="Recent documents" aria-haspopup="menu" aria-expanded="false" aria-controls="recent-panel">
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>
+          <div class="recent-panel" id="recent-panel" role="menu" aria-label="Recent documents" hidden></div>
+        </div>
         <button type="button" id="save" aria-keyshortcuts="Control+S Meta+S" title="Save (Ctrl+S). Shift-click or press Shift+Ctrl+S to save as">Save</button>
         <button type="button" id="download-pdf" aria-label="Download .pdf"><span class="long">Download </span>.pdf</button>
       </div>
