@@ -41,6 +41,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The runner image's Chrome can be weeks behind. Its 155.0.8059.39 crashed (a dangling raw_ptr check in the
+      # browser process) in 6 of 120 runs of check:files and check:images, and 155.0.8059.84 in none of 180.
+      - run: |
+          curl -fsSLo "$RUNNER_TEMP/chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y "$RUNNER_TEMP/chrome.deb"
+          google-chrome --version
       - if: matrix.check == 'browsers'
         run: npx playwright-core install --with-deps firefox webkit
       - run: npm run check:${{ matrix.check }}
