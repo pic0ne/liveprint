@@ -22,6 +22,15 @@ export async function until(what, attempt, tries = 300) {
   throw new Error(`gave up waiting for ${what}`);
 }
 
+/** Stops the script with `message`. A command Chrome never answers would otherwise leave it waiting until killed. */
+function stuck(message) {
+  console.error(`\n${message}`);
+  process.exit(1);
+}
+
+/** Longer than any command takes, page scripts included, so going past it means Chrome or the page is stuck. */
+const ANSWER_MS = 120_000;
+
 async function connect(url) {
   const ws = new WebSocket(url);
   const waiting = new Map();
@@ -29,14 +38,24 @@ async function connect(url) {
   let id = 0;
   ws.onmessage = ({ data }) => {
     const m = JSON.parse(data);
+    if (m.method === 'Inspector.targetCrashed') stuck('The page crashed.');
     if (waiting.has(m.id)) waiting.get(m.id)(m);
     else for (const listener of listeners) listener(m);
   };
+  ws.onclose = () => waiting.size > 0 && stuck('Chrome closed the DevTools connection with commands unanswered.');
   /** `sessionId` addresses a target attached with `flatten: true`, such as a page's worker. */
   const send = (method, params = {}, sessionId) =>
     new Promise((resolve, reject) => {
-      waiting.set(++id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message}`)) : resolve(m.result)));
-      ws.send(JSON.stringify({ id, method, params, sessionId }));
+      const n = ++id;
+      const what = params.expression ? `${method} of ${params.expression.trim().slice(0, 200)}` : method;
+      const timer = setTimeout(() => stuck(`Chrome did not answer ${what} in ${ANSWER_MS / 1000} s.`), ANSWER_MS);
+      waiting.set(n, (m) => {
+        clearTimeout(timer);
+        waiting.delete(n);
+        if (m.error) reject(new Error(`${method}: ${m.error.message}`));
+        else resolve(m.result);
+      });
+      ws.send(JSON.stringify({ id: n, method, params, sessionId }));
     });
   await new Promise((r) => (ws.onopen = r));
   return { send, listeners };
@@ -67,6 +86,7 @@ export async function launch({ width = 1400, height = 900, serve = true } = {}) 
 
   const browser = await connect((await json('/json/version')).webSocketDebuggerUrl);
   const page = await connect((await json('/json')).find((t) => t.type === 'page').webSocketDebuggerUrl);
+  await page.send('Inspector.enable');
   const evaluateIn = (target) => async (expression) => {
     const { result, exceptionDetails } = await target.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
     if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
