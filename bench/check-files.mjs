@@ -134,10 +134,7 @@ const WATCH_WORKER = `
       };
     }
   };`;
-// Without FileSystemObserver the app checks the file on disk only when the tab comes back. Its reports arrive when
-// the browser chooses, and one reloading the file under Ctrl+O let the check type before the open replaced the text.
 const STUB_PICKERS = `
-  delete window.FileSystemObserver;
   window.__picker = { open: null, save: null, opened: 0, saved: 0, suggested: null };
   window.showOpenFilePicker = async () => {
     __picker.opened++;
@@ -149,10 +146,28 @@ const STUB_PICKERS = `
     __picker.suggested = suggestedName;
     return (await navigator.storage.getDirectory()).getFileHandle(__picker.save, { create: true });
   };`;
+// Without FileSystemObserver the app checks the file on disk only when the tab comes back. Its reports arrive when the
+// browser chooses, so the run that keeps it counts them and waits for each one it causes.
+const NO_OBSERVER = `delete window.FileSystemObserver;`;
+const COUNT_REPORTS = `
+  window.__reports = 0;
+  window.__comebacks = 0;
+  window.addEventListener('focus', () => __comebacks++);
+  document.addEventListener('visibilitychange', () => __comebacks++);
+  const Observer = window.FileSystemObserver;
+  window.FileSystemObserver = class extends Observer {
+    constructor(callback) {
+      super((...args) => {
+        __reports++;
+        callback(...args);
+      });
+    }
+  };`;
 const NO_PICKERS = `delete window.showOpenFilePicker; delete window.showSaveFilePicker; delete Window.prototype.showOpenFilePicker; delete Window.prototype.showSaveFilePicker;`;
 
 await page.send('Page.addScriptToEvaluateOnNewDocument', { source: WATCH_WORKER });
 const stub = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: STUB_PICKERS });
+let noObserver = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: NO_OBSERVER });
 
 console.log('File System Access, pickers answered from the origin private file system');
 await load();
@@ -278,6 +293,47 @@ check('accepting overwrites the file with the text here', dialogs.length === 1 &
 await opfsWrite('notes.md', opened);
 await comeBack();
 await until('back to the opened text', async () => (await state()).text === opened);
+
+console.log('\nA file another program changes, reported by FileSystemObserver');
+await page.send('Page.removeScriptToEvaluateOnNewDocument', noObserver);
+const counting = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: COUNT_REPORTS });
+await load(() => page.send('Page.reload'));
+const reports = () => evaluate('__reports');
+const comebacks = () => evaluate('__comebacks');
+let reported = await reports();
+let cameBack = await comebacks();
+await opfsWrite('notes.md', `${opened}Observed.\n`);
+await until('the observer reloads the clean document', async () => (await reports()) > reported && (await state()).text === `${opened}Observed.\n`).catch(() => null);
+s = await state();
+check('a clean document takes the change the observer reports, without the tab coming back', s.text === `${opened}Observed.\n` && !s.edited && !(await disk()) && (await comebacks()) === cameBack, { s, comebacks: (await comebacks()) - cameBack });
+
+await cursorToEnd();
+await type('Mine.');
+reported = await reports();
+cameBack = await comebacks();
+await opfsWrite('notes.md', `${opened}Observed again.\n`);
+await until('the observer shows the notice', async () => (await reports()) > reported && (await disk())).catch(() => null);
+s = await state();
+check('an edited document keeps its text and shows Changed on disk when the observer reports a change', s.text === `${opened}Observed.\nMine.` && s.edited && (await disk()) && (await comebacks()) === cameBack, { s, comebacks: (await comebacks()) - cameBack });
+await evaluate(`document.getElementById('reload').click()`);
+await until('reloaded', async () => !(await state()).edited);
+
+reported = await reports();
+await opfsWrite('notes.md', `${opened}Before the open.\n`);
+await until('the observer reloads before the open', async () => (await reports()) > reported && (await state()).text === `${opened}Before the open.\n`);
+await opfsWrite('copy.md', '# Copy\n');
+await evaluate(`__picker.open = 'copy.md'`);
+dialogs.length = 0;
+await key('o', { ctrl: true });
+await until('copy.md open', async () => (await state()).name === 'copy.md');
+await settled();
+s = await state();
+check('Ctrl+O after the observer reloaded opens the file, clean and without asking', s.text === '# Copy\n' && !s.edited && dialogs.length === 0, { s, dialogs });
+await page.send('Page.removeScriptToEvaluateOnNewDocument', counting);
+noObserver = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: NO_OBSERVER });
+await evaluate(`__picker.open = 'notes.md'`);
+await key('o', { ctrl: true });
+await until('notes.md open again', async () => (await state()).name === 'notes.md');
 
 await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 200, y: 200, button: 'left', clickCount: 1 });
 await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 200, button: 'left', clickCount: 1 });
