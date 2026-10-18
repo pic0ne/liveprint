@@ -18,11 +18,17 @@ function listFiles(dir: string): string[] {
     .map((entry) => relative(dir, join(entry.parentPath, entry.name)).split(sep).join('/'));
 }
 
-function precache(outDir: string): Precache {
-  const files = precacheFiles(listFiles(outDir));
+function contentHash(outDir: string, files: readonly string[]): string {
   const hash = createHash('sha256');
   for (const file of files) hash.update(file).update('\0').update(readFileSync(join(outDir, file)));
-  return { version: hash.digest('hex').slice(0, 12), files };
+  return hash.digest('hex').slice(0, 12);
+}
+
+function precache(outDir: string): Precache {
+  const all = listFiles(outDir);
+  const files = precacheFiles(all);
+  const themeFonts = all.filter((path) => path.startsWith('fonts/') && !files.includes(path)).sort();
+  return { version: contentHash(outDir, files), files, fontsVersion: contentHash(outDir, themeFonts) };
 }
 
 /** Writes `sw.js` into the build's output with the list of what it precaches. */

@@ -3,8 +3,9 @@ import type { Precache } from './typst/files';
 declare const self: ServiceWorkerGlobalScope;
 declare const __PRECACHE: Precache;
 
-const { version, files } = __PRECACHE;
+const { version, files, fontsVersion } = __PRECACHE;
 const CACHE = `liveprint-${version}`;
+const FONT_CACHE = `liveprint-fonts-${fontsVersion}`;
 const scope = self.registration.scope;
 const FONTS = new URL('fonts/', scope).href;
 /** The HTML entry is stored under the scope URL, which is what a navigation to the app asks for. */
@@ -25,15 +26,16 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      const stale = (await caches.keys()).filter((name) => name.startsWith('liveprint-') && name !== CACHE);
+      const stale = (await caches.keys()).filter((name) => name.startsWith('liveprint-') && name !== CACHE && name !== FONT_CACHE);
       await Promise.all(stale.map((name) => caches.delete(name)));
       await self.clients.claim();
     })(),
   );
 });
 
-async function cacheFirst(request: Request, keep: boolean): Promise<Response> {
-  const cache = await caches.open(CACHE);
+/** Answers from `cacheName`. Without a hit, fetches, and keeps the response there when `keep`. */
+async function cacheFirst(request: Request, cacheName: string, keep: boolean): Promise<Response> {
+  const cache = await caches.open(cacheName);
   // vite preview sends `Vary: Origin`, and module scripts ask with an Origin the install's requests had not.
   const hit = await cache.match(request, { ignoreVary: true });
   if (hit) return hit;
@@ -50,6 +52,6 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET' || !request.url.startsWith(scope)) return;
   if (request.mode === 'navigate') event.respondWith(shell(request));
-  else if (precached.has(request.url)) event.respondWith(cacheFirst(request, false));
-  else if (request.url.startsWith(FONTS)) event.respondWith(cacheFirst(request, true));
+  else if (precached.has(request.url)) event.respondWith(cacheFirst(request, CACHE, false));
+  else if (request.url.startsWith(FONTS)) event.respondWith(cacheFirst(request, FONT_CACHE, true));
 });

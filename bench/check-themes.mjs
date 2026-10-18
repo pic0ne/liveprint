@@ -2,6 +2,7 @@
 // (`npm run check:themes` builds it). The Paper theme's fonts are failed through CDP's Fetch domain on the browser,
 // which also catches the service worker's own fetches. Runs once with the service worker kept from registering, and
 // once with it in control of the page, whose cache must not hold the fonts yet.
+import { readFileSync, writeFileSync } from 'node:fs';
 import { launch, sleep, until } from './cdp.mjs';
 
 const J = JSON.stringify;
@@ -155,7 +156,7 @@ await run(true);
 console.log('\nA stored theme that fails at start-up');
 await page.send('Page.navigate', { url: 'about:blank' });
 await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'all' });
-await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `ServiceWorkerContainer.prototype.register = () => new Promise(() => {});` });
+const NO_SW_AGAIN = (await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `ServiceWorkerContainer.prototype.register = () => new Promise(() => {});` })).identifier;
 await load();
 await evaluate(`localStorage.setItem('liveprint.page', ${J(J({ paper: 'a4', margins: 'normal', theme: 'paper' }))})`);
 blocked = true;
@@ -166,6 +167,40 @@ check('the preview starts in Book, says Paper failed, and the menu and storage s
 await load();
 s = await state();
 check('the next visit starts cleanly in Book', s.failure === '' && s.checked === 'book' && s.shown === 'book', s);
+
+/**
+ * An update of the app keeps the theme fonts cached before it. The update is a copy of sw.js with another version,
+ * which the browser installs on the next navigation, like any new build.
+ */
+console.log('\nAn update keeps the cached theme fonts');
+await page.send('Page.navigate', { url: 'about:blank' });
+await page.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'all' });
+await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: NO_SW_AGAIN });
+const swPath = new URL('../dist/sw.js', import.meta.url);
+const original = readFileSync(swPath, 'utf8');
+const version = /"version":"(\w+)"/.exec(original)[1];
+blocked = false;
+try {
+  await load();
+  await until('service worker active', () => evaluate(`navigator.serviceWorker.ready.then((r) => r.active?.state === 'activated')`), 600);
+  await load();
+  await choose('paper');
+  await settledIn('paper');
+  await choose('book');
+  await settledIn('book');
+  writeFileSync(swPath, original.replace(`"version":"${version}"`, `"version":"updated0000"`));
+  await load();
+  await until('the update activated', () => evaluate(`caches.keys().then((keys) => keys.includes('liveprint-updated0000') && !keys.includes('liveprint-${version}'))`), 600);
+  blocked = true;
+  const before = failedFetches;
+  await choose('paper');
+  await settledIn('paper').catch(() => null);
+  s = await state();
+  check('after the update, Paper shows with no font download', s.shown === 'paper' && failedFetches === before && s.failure === '', { s, failed: failedFetches - before });
+  blocked = false;
+} finally {
+  writeFileSync(swPath, original);
+}
 
 await close();
 console.log(failures ? `\n${failures} failed` : '\nall passed');

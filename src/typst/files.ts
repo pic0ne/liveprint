@@ -15,8 +15,13 @@ export const PACKAGE_FILES: Record<string, string> = {
   'mitex:0.2.6': 'packages/mitex-0.2.6.tar.gz',
 };
 
-/** What the service worker downloads on install: paths relative to the base URL, and a hash of their contents. */
+/**
+ * What the service worker downloads on install: paths relative to the base URL, and a hash of their contents. The
+ * theme fonts, cached when a theme is first chosen, have a hash of their own, so an update that leaves them alone
+ * keeps them.
+ */
 export interface Precache {
   version: string;
   files: string[];
+  fontsVersion: string;
 }
