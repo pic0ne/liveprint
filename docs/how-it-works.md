@@ -87,6 +87,8 @@ When another program changes the open file, liveprint notices when its tab comes
 
 Each tab keeps its document in IndexedDB as you type: its text, name, images and, in Chrome, its file handle and folder. This covers a crash, a closed laptop or a discarded tab. A reload brings back that tab's own document, because the tab's sessionStorage names its record, and a Web Lock keeps other tabs off it. A new tab takes the newest document that no open tab holds. liveprint keeps the 10 newest documents. Images are stored as bytes, not Blobs, because WebKit's private browsing hangs on putting a Blob into IndexedDB.
 
+The button joined to **Open** lists the other kept documents, newest first, with each one's name, when it was last edited and its first line. It leaves out this tab's own document and empty untitled ones. A document open in another tab is listed but cannot be opened here: two tabs on one record would overwrite each other's text, and opening a copy would fork the document without saying so. Opening a listed document moves the tab onto its record and does not change when it was last edited. The document the tab leaves stays in its own record, unsaved text included, and shows in the list, so nothing is discarded and liveprint does not ask first.
+
 ## Images
 
 Paste an image, or drop an image file on the editor, and liveprint writes `![](image.png)` at the cursor. The image is in the first preview drawn after the paste. An image alone in its paragraph is centred at its natural size, scaled down to the column if wider. PNG, JPEG, GIF, WebP and SVG work.
@@ -168,7 +170,7 @@ The scripts that use [`bench/cdp.mjs`](../bench/cdp.mjs) read two variables. `LI
 - `npm run bench:load` measures time to the first page, cold and warm.
 - `node bench/wasm-cache.mjs` traces whether V8 compiles the compiler again on the second and third visits.
 - `npm run check:linking` checks clicking, cursor following, text selection and formula clicks, in each theme.
-- `npm run check:files` checks opening, saving, restoring and dropping files, changes on disk and several tabs.
+- `npm run check:files` checks opening, saving, restoring and dropping files, changes on disk, several tabs and the recent documents list.
 - `npm run check:images` checks pasting, dropping, restoring, saving and linking images.
 - `npm run check:themes` checks theme font download failures and that an update keeps cached theme fonts.
 - `npm run check:browsers` checks the main paths in Chrome, Firefox and WebKit. It needs `npx playwright-core install firefox webkit`, and on Linux WebKit also needs libmanette, libenchant and libhidapi.
@@ -182,7 +184,6 @@ The `check:` scripts read page pixels to find where words and images print, so t
 - The second visit compiles the compiler again, about 330 ms on loopback.
 - Firefox and WebKit are tested with Playwright's builds, not released Firefox and Safari. A real paste in Firefox is untested, and linking accuracy is measured in Chrome only.
 - The real file and folder pickers and permission prompts are untested.
-- liveprint keeps the 10 newest documents, but nothing in the app lists them.
 - Without the File System Access API, liveprint cannot notice a change on disk.
 - The browser's find bar finds preview text only while the text layers show.
 - The preview draws at most twice the screen's pixel density, so at high zoom it looks soft. The PDF is not affected.

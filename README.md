@@ -13,6 +13,7 @@ It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 - Write LaTeX math between `$` signs. An incomplete formula shows as typed while the rest of the page keeps updating.
 - Choose the Book, Paper, or Modern theme, A4 or US Letter, and narrow, normal, or wide margins. The choice applies to the preview and the PDF.
 - Open and save `.md` files on disk. Pasted images are saved beside the file, as VS Code does.
+- Go back to a recent document from the menu beside Open. The browser keeps the 10 newest, unsaved text included.
 - Use it offline after the first visit, or install it as an app from the address bar.
 
 ## How it works
