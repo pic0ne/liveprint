@@ -1,10 +1,13 @@
 export const PAPERS = ['a4', 'us-letter'] as const;
 export const MARGINS = ['narrow', 'normal', 'wide'] as const;
-export const THEME_IDS = ['book', 'paper', 'modern'] as const;
+export const BUILT_IN_THEMES = ['book', 'paper', 'modern'] as const;
+/** The built-in themes, and the custom one, which a prelude the user loads sets. */
+export const THEME_IDS = [...BUILT_IN_THEMES, 'custom'] as const;
 
 /** Typst's own paper names, so they go into `#set page` as they are. */
 export type Paper = (typeof PAPERS)[number];
 export type Margins = (typeof MARGINS)[number];
+export type BuiltInTheme = (typeof BUILT_IN_THEMES)[number];
 export type ThemeId = (typeof THEME_IDS)[number];
 
 export interface PageSettings {

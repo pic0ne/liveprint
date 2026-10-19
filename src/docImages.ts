@@ -1,4 +1,4 @@
-import { freeName, IMAGE_TYPES, type ImagePath, withExtension } from './images';
+import { freeName, IMAGE_TYPES, type ImagePath, logoPath, withExtension } from './images';
 import type { Bytes, ToWorker } from './protocol';
 
 /** An SVG is drawn this many pixels along its longer side, enough for a column on a 2x display. */
@@ -27,11 +27,14 @@ async function drawSvg(blob: Blob, longSide = SVG_LONG_SIDE): Promise<ImageBitma
 }
 
 /**
- * Keeps the worker's images equal to the document's. Each `show` sends only what changed since the one before, in
- * the order they were called, so an image is in the worker before any edit sent after its `show` resolves.
+ * Keeps the worker's images equal to the document's, with the custom theme's logo beside them. Each `show` or
+ * `showLogo` sends only what changed since the one before, in the order they were called, so an image is in the
+ * worker before any message sent after its call resolves.
  */
 export class WorkerImages {
   readonly #send: (message: ToWorker, transfer: Transferable[]) => void;
+  #doc: ReadonlyMap<ImagePath, Blob> = new Map();
+  #logo: Blob | null = null;
   #sent: ReadonlyMap<ImagePath, Blob> = new Map();
   /** The longer side each SVG image was last drawn again at, since its blob was sent. */
   readonly #sharpened = new Map<ImagePath, number>();
@@ -61,6 +64,17 @@ export class WorkerImages {
   }
 
   show(images: ReadonlyMap<ImagePath, Blob>): Promise<void> {
+    this.#doc = images;
+    return this.#push();
+  }
+
+  showLogo(logo: Blob | null): Promise<void> {
+    this.#logo = logo;
+    return this.#push();
+  }
+
+  #push(): Promise<void> {
+    const images = this.#logo ? new Map([...this.#doc, [logoPath(this.#logo.type), this.#logo]]) : this.#doc;
     const sent = this.#queue.then(() => this.#sync(images));
     this.#queue = sent.catch(() => {});
     return sent;

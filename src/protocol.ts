@@ -1,3 +1,4 @@
+import type { Prelude } from './customTheme';
 import type { ImagePath } from './images';
 import type { Fit } from './linking/edges';
 import type { Run } from './linking/runs';
@@ -67,6 +68,12 @@ export interface Start {
 export type ToWorker =
   /** Sent before the first edit and on every change. */
   | { kind: 'settings'; settings: PageSettings }
+  /**
+   * The custom theme's prelude, or null when none is kept, sent before settings that choose Custom. The worker
+   * compiles it on its own and takes it only if that has no error. It answers `custom` with the same `id`, or
+   * `themeFailed`.
+   */
+  | CustomRequest
   | { kind: 'edit'; rev: Rev; markdown: string }
   /**
    * An image the document can show, sent before the edit that references it. Null bytes remove it. `drawn` is an
@@ -76,6 +83,19 @@ export type ToWorker =
   | { kind: 'pdf'; rev: Rev }
   | ({ kind: 'view' } & View)
   | LinkRequest;
+
+export interface CustomRequest {
+  kind: 'custom';
+  id: number;
+  prelude: Prelude | null;
+}
+
+/** Why a theme could not be used. */
+export type ThemeFailure =
+  /** Its fonts did not download or install. */
+  | { kind: 'fonts'; message: string }
+  /** The custom prelude of request `id` has an error compiled on its own, which `error` names with its line. */
+  | { kind: 'prelude'; id: number; name: string; error: string };
 
 export type FromWorker =
   | { kind: 'ready'; bootMs: number }
@@ -101,8 +121,10 @@ export type FromWorker =
       rasterMs: number;
     }
   | { kind: 'failed'; rev: Rev; diagnostics: string[] }
-  /** A theme's fonts did not download or install. The preview stays in `showing`, and choosing the theme again retries. */
-  | { kind: 'fontsFailed'; theme: ThemeId; showing: ThemeId; message: string }
+  /** The preview stays in `showing`, and choosing the theme again retries. */
+  | { kind: 'themeFailed'; theme: ThemeId; showing: ThemeId; reason: ThemeFailure }
+  /** The Custom theme now typesets with the prelude of request `id`. */
+  | { kind: 'custom'; id: number }
   | { kind: 'pdf'; rev: Rev; bytes: Bytes }
   /** The SVG image at `path` prints larger than its drawing: draw it `longSide` pixels along its longer side. */
   | { kind: 'svgWanted'; path: ImagePath; longSide: number }

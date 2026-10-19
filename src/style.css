@@ -395,6 +395,62 @@ button:focus-visible {
   }
 }
 
+/*
+ * The kept custom theme under the themes: its file names on one line, its actions on the next. As wide as the
+ * segments above it, so a long file name never widens the panel.
+ */
+.custom-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  contain: inline-size;
+}
+
+.custom-files {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+}
+
+/* The bar's quiet grey is the dark panel's own, so in the panel they take the segments' track. */
+.custom-row button.quiet {
+  background: var(--button);
+}
+
+.custom-row button.quiet:hover {
+  background: var(--button-hover);
+}
+
+.custom-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-logo {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  color: var(--panel-muted);
+}
+
+.custom-row[hidden],
+.custom-logo[hidden] {
+  display: none;
+}
+
+button.remove-logo {
+  flex: none;
+  width: 24px;
+  padding: 0;
+}
+
 .split {
   --ratio: 0.5;
   flex: 1;
@@ -660,5 +716,10 @@ button:focus-visible {
     right: 16px;
     width: auto;
     top: calc(100% + 2px);
+  }
+
+  /* Four themes in their own faces fit the phone's panel only this close together. */
+  .segments label {
+    padding-inline: 6px;
   }
 }

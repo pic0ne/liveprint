@@ -1,8 +1,9 @@
 import { convert } from './convert/toTypst';
+import { type CustomTheme, keepCustomTheme, logoBlob, type Prelude, readCustomTheme } from './customTheme';
 import { type Doc, documentTitle, imageNotice, isEdited, noticeText, pdfName, untitled } from './doc';
 import { addImages, WorkerImages } from './docImages';
 import { createEditor, jumpTo, replaceText } from './editor';
-import { chooseFolder, diskText, download, droppedFile, imagesAllowed, openFile, saveFile, watchFile } from './files';
+import { chooseFolder, diskText, download, droppedFile, imagesAllowed, openFile, pickFile, saveFile, watchFile } from './files';
 import { IMAGE_TYPE_NAMES, IMAGE_TYPES, type ImagePath } from './images';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
@@ -14,7 +15,7 @@ import { claimDoc, type DocId, keepDoc, keepImages, letGo, recentDocs, takeDoc }
 import sample from './sample.md?raw';
 import { defaultSettings, type PageSettings, parseSettings, sameSettings } from './settings';
 import { SettingsMenu } from './settingsMenu';
-import { THEMES } from './typst/themes';
+import { themeOf } from './typst/themes';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -73,7 +74,7 @@ window.addEventListener('keydown', (e) => {
 
 const meter = new LatencyMeter();
 // Raster time and redrawn pages add up over every `pages` message of one rev.
-const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, math: '', failure: '', fontFailure: '', fileFailure: '' };
+const last = { bootMs: NaN, rev: null as Rev | null, convertMs: NaN, compileMs: NaN, rasterMs: NaN, redrawn: 0, pages: 0, math: '', failure: '', themeFailure: '', fileFailure: '' };
 const ms = (n: number) => (Number.isNaN(n) ? '–' : n.toFixed(1));
 
 /**
@@ -91,7 +92,7 @@ function drawOverlay(): void {
     : [];
   const lines = stats.map((text) => Object.assign(document.createElement('div'), { textContent: text }));
   if (last.math) lines.push(Object.assign(document.createElement('div'), { textContent: last.math, className: 'notice' }));
-  for (const failure of [last.failure, last.fontFailure, last.fileFailure].filter(Boolean)) {
+  for (const failure of [last.failure, last.themeFailure, last.fileFailure].filter(Boolean)) {
     lines.push(Object.assign(document.createElement('div'), { textContent: failure, className: 'failure' }));
   }
   overlay.replaceChildren(...lines);
@@ -130,16 +131,114 @@ function keepSettings(next: PageSettings): void {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
   } catch {}
 }
-send({ kind: 'settings', settings });
-const menu = new SettingsMenu($('settings'), settings, (next) => {
-  // Choosing a theme, the failed one again included, answers a font failure.
-  if (next.theme !== settings.theme) {
-    last.fontFailure = '';
-    drawOverlay();
-  }
+function useSettings(next: PageSettings): void {
   keepSettings(next);
   send({ kind: 'settings', settings: next });
+}
+
+/** The custom theme the browser keeps. Its prelude is the newest the worker took. */
+let custom = await readCustomTheme().catch((error) => {
+  last.fileFailure = `Could not read the custom theme: ${message(error)}`;
+  return null;
 });
+let customId = 0;
+/**
+ * The prelude sent to the worker that Custom is chosen with once the worker takes it, and the way to retry it that a
+ * failure names. Only the newest counts.
+ */
+let trying: { id: number; prelude: Prelude; retry: string } | null = null;
+
+function sendCustom(prelude: Prelude | null): number {
+  send({ kind: 'custom', id: ++customId, prelude });
+  return customId;
+}
+
+/** Sends the prelude, and chooses Custom when the worker takes it. */
+function tryPrelude(prelude: Prelude, retry: string): void {
+  trying = { id: sendCustom(prelude), prelude, retry };
+}
+
+const customFiles = (theme: CustomTheme | null) => theme && { prelude: theme.prelude.name, logo: theme.logo?.name ?? null };
+
+/** Keeps the custom theme, shows its files in the menu, and gives the worker its logo. */
+async function keepCustom(next: CustomTheme | null): Promise<void> {
+  const logo = next?.logo ?? null;
+  const logoChanged = logo !== (custom?.logo ?? null);
+  custom = next;
+  menu.customFiles(customFiles(next));
+  keepCustomTheme(next).catch((error) => {
+    last.fileFailure = `Could not keep the custom theme in this browser: ${message(error)}`;
+    drawOverlay();
+  });
+  if (logoChanged) await workerImages.showLogo(logo && logoBlob(logo));
+}
+
+const pickPrelude = async (): Promise<Prelude | null> => {
+  const file = await pickFile('.typ');
+  return file && { name: file.name, text: await file.text() };
+};
+
+/** A kept prelude is used as it is; without one, the reader picks a file. Cancelling leaves the theme as it was. */
+async function chooseCustom(): Promise<void> {
+  const prelude = custom?.prelude ?? (await pickPrelude());
+  if (prelude) tryPrelude(prelude, 'Choose Custom again');
+  else menu.select(settings);
+}
+
+const menuActions = {
+  change(next: PageSettings) {
+    // Choosing a theme, the failed one again included, answers a theme failure.
+    if (next.theme !== settings.theme) {
+      last.themeFailure = '';
+      drawOverlay();
+    }
+    if (next.theme !== 'custom' || settings.theme === 'custom') useSettings(next);
+    else if (trying) useSettings({ ...next, theme: settings.theme });
+    else void chooseCustom().catch(themeFileFailed);
+  },
+  replacePrelude() {
+    void pickPrelude()
+      .then((prelude) => prelude && tryPrelude(prelude, 'Choose Replace… again'))
+      .catch(themeFileFailed);
+  },
+  chooseLogo() {
+    void pickFile([...IMAGE_TYPES].join(','))
+      .then(async (file) => {
+        if (!file || !custom) return;
+        if (!IMAGE_TYPES.has(file.type)) throw new Error(`liveprint shows ${IMAGE_TYPE_NAMES} images`);
+        await keepCustom({ ...custom, logo: { name: file.name, type: file.type, bytes: await file.arrayBuffer() } });
+      })
+      .catch(themeFileFailed);
+  },
+  removePrelude() {
+    trying = null;
+    sendCustom(null);
+    void keepCustom(null);
+    if (settings.theme === 'custom') useSettings({ ...settings, theme: 'book' });
+    menu.select(settings);
+  },
+  removeLogo() {
+    if (custom) void keepCustom({ ...custom, logo: null });
+  },
+};
+
+function themeFileFailed(error: unknown): void {
+  last.themeFailure = `Could not read the file: ${message(error)}`;
+  menu.select(settings);
+  drawOverlay();
+}
+
+// The worker has the logo and the prelude before settings that choose Custom, so the first compile is in it.
+if (custom) {
+  await workerImages.showLogo(custom.logo ? logoBlob(custom.logo) : null);
+  const id = sendCustom(custom.prelude);
+  if (settings.theme === 'custom') trying = { id, prelude: custom.prelude, retry: 'Choose Custom again' };
+} else if (settings.theme === 'custom') {
+  keepSettings({ ...settings, theme: 'book' });
+}
+send({ kind: 'settings', settings });
+const menu = new SettingsMenu($('settings'), settings, menuActions);
+menu.customFiles(customFiles(custom));
 const pages = new Pages($('pages'), (view) => send({ kind: 'view', ...view }));
 
 let rev: Rev = firstRev;
@@ -562,12 +661,32 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       last.failure = data.diagnostics[0] ?? 'Compile failed';
       drawOverlay();
       break;
-    case 'fontsFailed': {
-      // The reader has moved on to another theme since.
-      if (data.theme !== settings.theme) break;
-      const name = THEMES[data.theme].label;
-      last.fontFailure = `Could not download the ${name} fonts: ${data.message}. Choose ${name} again to retry.`;
-      keepSettings({ ...settings, theme: data.showing });
+    case 'themeFailed': {
+      const { reason } = data;
+      if (reason.kind === 'fonts') {
+        // The reader has moved on to another theme since.
+        if (data.theme !== settings.theme) break;
+        const name = themeOf(data.theme).label;
+        last.themeFailure = `Could not download the ${name} fonts: ${reason.message}. Choose ${name} again to retry.`;
+      } else {
+        if (reason.id !== trying?.id) break;
+        last.themeFailure = `Could not use ${reason.name}: ${reason.error}. ${trying.retry} to retry.`;
+        trying = null;
+      }
+      if (data.theme === settings.theme) keepSettings({ ...settings, theme: data.showing });
+      menu.select(settings);
+      drawOverlay();
+      break;
+    }
+    case 'custom': {
+      if (data.id !== trying?.id) break;
+      const { prelude } = trying;
+      trying = null;
+      if (prelude !== custom?.prelude) void keepCustom({ prelude, logo: custom?.logo ?? null });
+      last.themeFailure = '';
+      // The same document and settings can print differently now, so the cursor's spot is asked again.
+      located = null;
+      if (settings.theme !== 'custom') useSettings({ ...settings, theme: 'custom' });
       menu.select(settings);
       drawOverlay();
       break;

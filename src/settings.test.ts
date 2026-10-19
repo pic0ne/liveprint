@@ -48,3 +48,7 @@ test('parseSettings reads a full stored value and drops extra fields', () => {
     theme: 'modern',
   });
 });
+
+test('parseSettings reads the custom theme', () => {
+  expect(parseSettings('{"paper":"a4","margins":"wide","theme":"custom"}', fallback)).toEqual({ paper: 'a4', margins: 'wide', theme: 'custom' });
+});

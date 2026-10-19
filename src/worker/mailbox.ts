@@ -1,5 +1,5 @@
 import type { ImagePath } from '../images';
-import type { LinkRequest, Rev, ToWorker, View } from '../protocol';
+import type { CustomRequest, LinkRequest, Rev, ToWorker, View } from '../protocol';
 import type { PageSettings } from '../settings';
 
 export type Edit = Extract<ToWorker, { kind: 'edit' }>;
@@ -11,6 +11,8 @@ const LINK_ORDER: LinkRequest['kind'][] = ['source', 'locate', 'runs'];
 export interface MailboxHandlers {
   /** True when the document must compile again to show them. */
   settings(settings: PageSettings): Promise<boolean>;
+  /** True when the document must compile again to show it. */
+  custom(request: CustomRequest): Promise<boolean>;
   edit(edit: Edit): Promise<void>;
   /** Bookkeeping only, applied between jobs so the next job draws at the new size. */
   view(view: View): void;
@@ -28,8 +30,9 @@ export interface MailboxHandlers {
 /**
  * Single-slot mailbox, latest wins, and the worker's only scheduler. An edit that arrives while booting or busy
  * replaces `pending`, so stale edits are never compiled. Settings coalesce the same way and run before the edit, so
- * a change and an edit in one burst compile once. A change on its own compiles the last edit again. Images coalesce
- * per path and apply before both, then compile the last edit again the same way, so an image sent ahead of the edit
+ * a change and an edit in one burst compile once. A change on its own compiles the last edit again. The custom
+ * prelude coalesces the same way and runs before settings, so settings that choose Custom find it. Images coalesce
+ * per path and apply before all three, then compile the last edit again the same way, so an image sent ahead of the edit
  * that references it is there when that edit compiles. A PDF request
  * runs after any pending edit, so it prints the newest text. Linking requests keep one slot per kind and run after
  * edits and PDFs, so they answer from the newest document. Dirty pages are drawn only when nothing else waits, one
@@ -38,6 +41,7 @@ export interface MailboxHandlers {
 export class Mailbox {
   #phase: 'booting' | 'idle' | 'busy' = 'booting';
   #settings: PageSettings | null = null;
+  #custom: CustomRequest | null = null;
   #pending: Edit | null = null;
   /** The newest edit compiled, which a settings change compiles again. */
   #last: Edit | null = null;
@@ -59,6 +63,9 @@ export class Mailbox {
     switch (message.kind) {
       case 'settings':
         this.#settings = message.settings;
+        break;
+      case 'custom':
+        this.#custom = message;
         break;
       case 'edit':
         this.#pending = message;
@@ -102,11 +109,15 @@ export class Mailbox {
           this.#handlers.images([...images.values()]);
           this.#pending ??= this.#last;
         }
+        const custom = this.#custom;
         const settings = this.#settings;
         const edit = this.#pending;
         const pdf = this.#pdf;
         const link = LINK_ORDER.map((kind) => this.#links.get(kind)).find((request) => request !== undefined);
-        if (settings) {
+        if (custom) {
+          this.#custom = null;
+          if (await this.#handlers.custom(custom)) this.#pending ??= this.#last;
+        } else if (settings) {
           this.#settings = null;
           if (await this.#handlers.settings(settings)) this.#pending ??= this.#last;
         } else if (edit) {

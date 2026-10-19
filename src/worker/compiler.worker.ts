@@ -1,15 +1,16 @@
 import { CompileFormatEnum, createTypstFontBuilder, type IncrementalServer, type TypstCompiler } from '@myriaddreamin/typst.ts/compiler';
 import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/wasm?url';
 import type { MathCall } from '../convert/toTypst';
-import type { ImagePath } from '../images';
+import type { Prelude } from '../customTheme';
+import { type ImagePath, isLogoPath } from '../images';
 import { type Advance, fitRuns } from '../linking/edges';
 import { type ImageBox, type ImageMark, imageBoxes } from '../linking/imageBoxes';
-import { type Bytes, type FromWorker, type LinkRequest, type Rev, type Start, type ToWorker } from '../protocol';
+import { type Bytes, type CustomRequest, type FromWorker, type LinkRequest, type Rev, type Start, type ThemeFailure, type ToWorker } from '../protocol';
 import { type PageSettings, sameSettings, type ThemeId } from '../settings';
 import { compileMarkdown, type Diagnostic } from '../typst/compileMarkdown';
-import { createCompiler, MAIN_PATH } from '../typst/compiler';
+import { createCompiler, MAIN_PATH, mainSource } from '../typst/compiler';
 import { FONT_FILES, PACKAGE_FILES } from '../typst/files';
-import { preludeFor, THEMES } from '../typst/themes';
+import { type CustomSource, preludeError, preludeFor, themeOf } from '../typst/themes';
 import { measureFaces } from './advances';
 import { FontFiles } from './fonts';
 import { Linker, sourceAt, spotOf } from './linker';
@@ -106,9 +107,14 @@ const rejected = new Map<MathCall, string>();
 let applied: PageSettings | null = null;
 /** The newest settings asked for, which wait while their fonts download. */
 let wanted: PageSettings | null = null;
+/** The prelude the Custom theme typesets with: the newest that compiled on its own. Null until one does. */
+let custom: Prelude | null = null;
+
+/** What a compile needs of the custom theme. The logo is the one among the images. */
+const customSource = (): CustomSource | null => custom && { source: custom.text, logo: [...available].find(isLogoPath) ?? null };
 
 /** Fits runs in the faces the theme sets text in that the browser could load. */
-const fitterFor = (theme: ThemeId) => fitRuns(THEMES[theme].text.flatMap((path) => (faces.has(path) ? [{ path, advance: faces.get(path)! }] : [])));
+const fitterFor = (theme: ThemeId) => fitRuns(themeOf(theme).text.flatMap((path) => (faces.has(path) ? [{ path, advance: faces.get(path)! }] : [])));
 
 function addFaces(paths: string[], advances: (Advance | null)[]): void {
   paths.forEach((path, i) => {
@@ -156,10 +162,12 @@ async function installFonts(): Promise<void> {
  */
 async function applySettings(next: PageSettings): Promise<boolean> {
   wanted = next;
-  const theme = THEMES[next.theme];
-  const report = (error: unknown) => post({ kind: 'fontsFailed', theme: next.theme, showing: applied?.theme ?? 'book', message: errorText(error) });
+  const theme = themeOf(next.theme);
+  const report = (error: unknown) => failed(next.theme, { kind: 'fonts', message: errorText(error) });
   // Before the first compile there is nothing to keep showing, so the fallback is Book, which needs only the boot fonts.
   const fallBack = (error: unknown) => (report(error), applied ? false : applySettings({ ...next, theme: 'book' }));
+  // The prelude failed on its own, and said so.
+  if (next.theme === 'custom' && !custom) return applied ? false : applySettings({ ...next, theme: 'book' });
   if (!fonts.has(theme.fonts)) {
     const loaded = fonts.load(theme.fonts);
     if (applied) {
@@ -184,13 +192,49 @@ async function applySettings(next: PageSettings): Promise<boolean> {
   return true;
 }
 
+const failed = (theme: ThemeId, reason: ThemeFailure) => post({ kind: 'themeFailed', theme, showing: applied?.theme ?? 'book', reason });
+
+/** A path of its own, so the document's main.typ, which the PDF and the image marks compile, stays as it is. */
+const CHECK_PATH = '/prelude.typ';
+
+/**
+ * Takes the custom prelude if it compiles on its own, with an empty body, in the page settings on screen. An error
+ * keeps the one before, and the theme on screen. A prelude that compiles can still fail on a real document: that
+ * shows as any failed compile does.
+ */
+async function applyCustom({ id, prelude }: CustomRequest): Promise<boolean> {
+  const changed = prelude?.text !== custom?.text;
+  if (changed && prelude) {
+    const settings: PageSettings = { paper: applied?.paper ?? 'a4', margins: applied?.margins ?? 'normal', theme: 'custom' };
+    const source = { source: prelude.text, logo: [...available].find(isLogoPath) ?? null };
+    let error: string | null;
+    try {
+      compiler.addSource(CHECK_PATH, mainSource(preludeFor(settings, null, source), ''));
+      const { result, diagnostics = [] } = await compiler.compile({ mainFilePath: CHECK_PATH, diagnostics: 'full' });
+      error = result ? null : (preludeError(settings, source, diagnostics) ?? 'it does not compile');
+    } catch (e) {
+      error = errorText(e);
+    }
+    if (error !== null) {
+      failed('custom', { kind: 'prelude', id, name: prelude.name, error });
+      return false;
+    }
+  }
+  custom = prelude;
+  post({ kind: 'custom', id });
+  if (applied?.theme !== 'custom' || !changed) return false;
+  if (!custom) applied = { ...applied, theme: 'book' };
+  return true;
+}
+
 const diagnosticText = ({ package: pkg, path, range, severity, message }: Diagnostic) =>
   `${pkg ? `${pkg}@` : ''}${path}:${range.replace(/\d+/g, (n) => String(Number(n) + 1))}: ${severity}: ${message}`;
 
 async function compileEdit({ rev, markdown }: Edit): Promise<void> {
   const settings = applied!;
+  const theme = customSource();
   try {
-    const { converted, result, diagnostics = [], convertMs, compileMs } = await compileMarkdown(markdown, (front) => preludeFor(settings, front), available, rejected, (source) => {
+    const { converted, result, diagnostics = [], convertMs, compileMs } = await compileMarkdown(markdown, (front) => preludeFor(settings, front, theme), available, rejected, (source) => {
       compiler.addSource(MAIN_PATH, source);
       return compiler.compile({ mainFilePath: MAIN_PATH, incrementalServer: server, diagnostics: 'full' });
     });
@@ -293,6 +337,7 @@ function applyImages(updates: ImageUpdate[]): void {
 
 const mailbox = new Mailbox({
   settings: applySettings,
+  custom: applyCustom,
   images: applyImages,
   edit: compileEdit,
   view: (view) => raster.setView(view),
@@ -304,7 +349,7 @@ const mailbox = new Mailbox({
 self.onmessage = ({ data }: MessageEvent<Start | ToWorker>) => {
   if (data.kind === 'start') return started(new URL(data.publicUrl));
   // A theme's fonts start downloading when it is chosen, even while the worker boots or compiles.
-  if (data.kind === 'settings') fonts.load(THEMES[data.settings.theme].fonts).catch(() => {});
+  if (data.kind === 'settings') fonts.load(themeOf(data.settings.theme).fonts).catch(() => {});
   mailbox.receive(data);
 };
 

@@ -1,6 +1,6 @@
 import { Popover } from './popover';
 import { MARGINS, MARGINS_LABEL, type PageSettings, PAPER_LABEL, PAPERS, parseSettings, THEME_IDS, type ThemeId } from './settings';
-import { THEMES } from './typst/themes';
+import { themeOf } from './typst/themes';
 
 interface Option<K extends keyof PageSettings> {
   value: PageSettings[K];
@@ -12,40 +12,93 @@ type Group = { [K in keyof PageSettings]: { key: K; legend: string; options: Opt
 const GROUPS: Group[] = [
   { key: 'paper', legend: 'Paper', options: PAPERS.map((value) => ({ value, label: PAPER_LABEL[value] })) },
   { key: 'margins', legend: 'Margins', options: MARGINS.map((value) => ({ value, label: MARGINS_LABEL[value] })) },
-  { key: 'theme', legend: 'Theme', options: THEME_IDS.map((value) => ({ value, label: THEMES[value].label })) },
+  { key: 'theme', legend: 'Theme', options: THEME_IDS.map((value) => ({ value, label: themeOf(value).label })) },
 ];
 
 const faceFamily = (theme: ThemeId) => `liveprint theme ${theme}`;
 
-const settingsLabel = (s: PageSettings) => `${PAPER_LABEL[s.paper]} · ${MARGINS_LABEL[s.margins]} · ${THEMES[s.theme].label}`;
+const settingsLabel = (s: PageSettings) => `${PAPER_LABEL[s.paper]} · ${MARGINS_LABEL[s.margins]} · ${themeOf(s.theme).label}`;
+
+/** The names of the kept custom theme's files. */
+export interface CustomFiles {
+  prelude: string;
+  logo: string | null;
+}
+
+/** What the reader asks of the menu. Each file action runs in the click, which a file input needs. */
+export interface SettingsActions {
+  change(settings: PageSettings): void;
+  replacePrelude(): void;
+  chooseLogo(): void;
+  removePrelude(): void;
+  removeLogo(): void;
+}
+
+const button = (textContent: string, onClick: () => void) => {
+  const element = Object.assign(document.createElement('button'), { type: 'button', className: 'quiet', textContent });
+  element.addEventListener('click', onClick);
+  return element;
+};
 
 /**
  * The top bar's page settings: a button that names the current choice and opens a panel of segmented radio groups.
- * A change applies at once. Each theme's name is set in its own face, loaded the first time the panel opens.
+ * A change applies at once. Each theme's name is set in its own face, loaded the first time the panel opens. Under
+ * the themes, a row names the custom theme's prelude and logo once one is kept.
  */
 export class SettingsMenu {
   readonly #button: HTMLButtonElement;
   readonly #panel: HTMLElement;
-  readonly #onChange: (settings: PageSettings) => void;
+  readonly #custom = Object.assign(document.createElement('div'), { className: 'custom-row', hidden: true });
+  readonly #preludeName = Object.assign(document.createElement('span'), { className: 'custom-name' });
+  readonly #logo = Object.assign(document.createElement('span'), { className: 'custom-logo' });
+  readonly #logoName = Object.assign(document.createElement('span'), { className: 'custom-name' });
+  readonly #logoButton: HTMLButtonElement;
+  readonly #removeLogo: HTMLButtonElement;
   #settings: PageSettings;
   #shownTheme: ThemeId | null = null;
   #facesLoaded = false;
 
-  constructor(root: HTMLElement, settings: PageSettings, onChange: (settings: PageSettings) => void) {
+  constructor(root: HTMLElement, settings: PageSettings, actions: SettingsActions) {
     this.#button = root.querySelector('button')!;
     this.#panel = root.querySelector('.settings-panel')!;
     this.#settings = settings;
-    this.#onChange = onChange;
     this.#panel.append(...GROUPS.map((group) => this.#group(group)));
+    this.#logoButton = button('Logo…', actions.chooseLogo);
+    this.#removeLogo = button('×', () => {
+      this.#logoButton.focus();
+      actions.removeLogo();
+    });
+    this.#removeLogo.classList.add('remove-logo');
+    this.#logo.append(this.#logoName, this.#removeLogo);
+    const names = Object.assign(document.createElement('span'), { className: 'custom-files' });
+    names.append(this.#preludeName, this.#logo);
+    const remove = button('Remove', () => {
+      this.#panel.querySelector<HTMLInputElement>('input[name=theme]:checked')?.focus();
+      actions.removePrelude();
+    });
+    this.#custom.setAttribute('role', 'group');
+    this.#custom.append(names, button('Replace…', actions.replacePrelude), this.#logoButton, remove);
+    this.#panel.querySelector('fieldset:last-child')!.append(this.#custom);
     this.#render();
 
     this.#panel.addEventListener('change', (e) => {
       const input = e.target as HTMLInputElement;
       this.#settings = parseSettings({ ...this.#settings, [input.name]: input.value }, this.#settings);
       this.#render();
-      this.#onChange(this.#settings);
+      actions.change(this.#settings);
     });
     new Popover(root, this.#button, this.#panel, () => this.#open());
+  }
+
+  /** Names the kept custom theme's files, or hides the row when none is kept. */
+  customFiles(files: CustomFiles | null): void {
+    this.#custom.hidden = files === null;
+    if (!files) return;
+    this.#custom.setAttribute('aria-label', `Custom theme: ${files.prelude}${files.logo ? `, logo ${files.logo}` : ''}`);
+    this.#preludeName.textContent = this.#preludeName.title = files.prelude;
+    this.#logo.hidden = files.logo === null;
+    this.#logoName.textContent = this.#logoName.title = files.logo ?? '';
+    this.#removeLogo.setAttribute('aria-label', `Remove the logo ${files.logo ?? ''}`);
   }
 
   /** Shows `settings` as the choice, without calling back: the page's own correction, not the reader's. */
@@ -69,7 +122,7 @@ export class SettingsMenu {
         const option = document.createElement('label');
         const input = Object.assign(document.createElement('input'), { type: 'radio', name: key, value });
         const text = Object.assign(document.createElement('span'), { textContent: label });
-        if (key === 'theme') text.style.fontFamily = `"${faceFamily(value as ThemeId)}", serif`;
+        if (key === 'theme' && themeOf(value as ThemeId).face) text.style.fontFamily = `"${faceFamily(value as ThemeId)}", serif`;
         option.append(input, text);
         return option;
       }),
@@ -92,9 +145,10 @@ export class SettingsMenu {
   #open(): HTMLInputElement | null {
     if (!this.#facesLoaded) {
       this.#facesLoaded = true;
-      const rules = THEME_IDS.map(
-        (id) => `@font-face { font-family: "${faceFamily(id)}"; src: url("${import.meta.env.BASE_URL}${THEMES[id].face}"); font-display: swap; }`,
-      );
+      const rules = THEME_IDS.flatMap((id) => {
+        const { face } = themeOf(id);
+        return face ? [`@font-face { font-family: "${faceFamily(id)}"; src: url("${import.meta.env.BASE_URL}${face}"); font-display: swap; }`] : [];
+      });
       document.head.append(Object.assign(document.createElement('style'), { textContent: rules.join('\n') }));
     }
     return this.#panel.querySelector<HTMLInputElement>('input:checked');

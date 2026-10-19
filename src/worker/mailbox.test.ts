@@ -12,6 +12,7 @@ const source = (id: number) => ({ kind: 'source', id, page: 0, fx: 0, fy: 0 }) a
 const image = (path: string, size: number | null) =>
   ({ kind: 'image', path: path as ImagePath, bytes: size === null ? null : (new Uint8Array(size) as Bytes), drawn: null }) as const;
 const settings = (theme: ThemeId) => ({ kind: 'settings', settings: { paper: 'a4', margins: 'normal', theme } }) as const;
+const custom = (id: number, name: string | null) => ({ kind: 'custom', id, prelude: name === null ? null : { name, text: `// ${name}` } }) as const;
 
 /** A mailbox whose compiles finish only when the test says so. */
 function harness() {
@@ -29,6 +30,10 @@ function harness() {
     settings: async (s) => {
       await job(`settings ${s.theme}`)();
       return changes.has(s.theme);
+    },
+    custom: async (c) => {
+      await job(`custom ${c.id} ${c.prelude?.name ?? null}`)();
+      return c.prelude !== null;
     },
     edit: (e) => job(`edit ${e.rev}`)(),
     view: (v) => log.push(`view ${v.widthPx}`),
@@ -224,5 +229,40 @@ test('images sent while booting apply before the first edit, which compiles once
   await settle();
   await finishCurrent();
   expect(log).toEqual(['images cat.png=2', 'edit 1']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('the custom prelude coalesces to the newest and runs before the settings and the edit of the same burst', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.receive(custom(1, 'a.typ'));
+  mailbox.receive(edit(1));
+  mailbox.booted();
+  await settle();
+  await finishCurrent();
+  await finishCurrent();
+  mailbox.receive(settings('custom'));
+  mailbox.receive(custom(2, 'b.typ'));
+  mailbox.receive(custom(3, 'c.typ'));
+  mailbox.receive(edit(2));
+  await settle();
+  for (let i = 0; i < 3; i++) await finishCurrent();
+  expect(log).toEqual(['custom 1 a.typ', 'edit 1', 'custom 3 c.typ', 'settings custom', 'edit 2']);
+  expect(mailbox.phase).toBe('idle');
+});
+
+test('a custom prelude on its own compiles the last edit again when the handler says it shows', async () => {
+  const { mailbox, log, settle, finishCurrent } = harness();
+  mailbox.booted();
+  mailbox.receive(edit(1));
+  await settle();
+  await finishCurrent();
+  mailbox.receive(custom(1, 'a.typ'));
+  await settle();
+  await finishCurrent();
+  await finishCurrent();
+  mailbox.receive(custom(2, null));
+  await settle();
+  await finishCurrent();
+  expect(log).toEqual(['edit 1', 'custom 1 a.typ', 'edit 1', 'custom 2 null']);
   expect(mailbox.phase).toBe('idle');
 });

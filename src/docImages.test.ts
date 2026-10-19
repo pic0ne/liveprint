@@ -37,3 +37,16 @@ test('the worker is sent only the images that changed, removals as null, in call
   await worker.show(new Map([[path('b.png'), png('b.png', 3)]]));
   expect(sent).toEqual(['a.png 1', 'b.png 2', 'a.png null', 'b.png 3']);
 });
+
+test('the logo goes to the worker under liveprint\'s own folder, beside the document\'s images, until it is taken away', async () => {
+  const sent: string[] = [];
+  const worker = new WorkerImages((message: ToWorker) => {
+    if (message.kind === 'image') sent.push(`${message.path} ${message.bytes ? [...message.bytes].join('') : null}`);
+  });
+  const path = (p: string) => p as ImagePath;
+  void worker.show(new Map([[path('a.png'), png('a.png', 1)]]));
+  void worker.showLogo(new Blob([new Uint8Array([7])], { type: 'image/jpeg' }));
+  await worker.show(new Map());
+  await worker.showLogo(null);
+  expect(sent).toEqual(['a.png 1', '.liveprint/logo.jpg 7', 'a.png null', '.liveprint/logo.jpg null']);
+});
