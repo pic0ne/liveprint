@@ -15,6 +15,7 @@ It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 - Pages after the first carry the title or date in a running header, set in the theme's style.
 - Add footnotes with `[^1]` and a table of contents with a `[[toc]]` line. Clicks on either go to their Markdown.
 - Choose the Book, Paper, or Modern theme, A4 or US Letter, and narrow, normal, or wide margins. The choice applies to the preview and the PDF.
+- Load a Typst prelude of your own, with a logo, as a Custom theme. The browser keeps it for every document.
 - Open and save `.md` files on disk. Pasted images are saved beside the file, as VS Code does.
 - Go back to a recent document from the menu beside Open. The browser keeps the 10 newest, unsaved text included.
 - Use it offline after the first visit, or install it as an app from the address bar.

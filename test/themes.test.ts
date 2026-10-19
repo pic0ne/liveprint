@@ -2,6 +2,7 @@ import { CompileFormatEnum, type TypstCompiler } from '@myriaddreamin/typst.ts/c
 import { beforeAll, expect, test } from 'vitest';
 import { nodeCompiler, repoText } from '../bench/typst-node';
 import { convert } from '../src/convert/toTypst';
+import type { ImagePath } from '../src/images';
 import { BUILT_IN_THEMES, MARGINS, type Margins, type Paper, PAPERS, type ThemeId } from '../src/settings';
 import { MAIN_PATH, mainSource } from '../src/typst/compiler';
 import { preludeFor } from '../src/typst/themes';
@@ -67,3 +68,19 @@ test('a date that names no calendar day prints, and leaves the PDF without a dat
   expect(pdf).not.toContain('/CreationDate');
 });
 
+/** The example prelude in the docs' Custom theme section. */
+const example = /## Custom theme\n[\s\S]*?```typst\n([\s\S]*?)```/.exec(repoText('docs/how-it-works.md'))![1]!;
+
+test('the docs’ example prelude prints a document with front matter and a logo, as a Custom theme', async () => {
+  const { typst, frontMatter } = convert(FRONT);
+  const logo = '.liveprint/logo.png' as ImagePath;
+  compiler.mapShadow(`/images/${logo}`, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
+  compiler.addSource(MAIN_PATH, mainSource(preludeFor({ paper: 'a4', margins: 'normal', theme: 'custom' }, frontMatter, { source: example, logo }), typst));
+  const { result, diagnostics = [] } = await compiler.compile({ mainFilePath: MAIN_PATH, format: CompileFormatEnum.pdf, diagnostics: 'unix' });
+  compiler.unmapShadow(`/images/${logo}`);
+  expect(diagnostics.filter((d) => /\berror\b/.test(d))).toEqual([]);
+  const pdf = new TextDecoder('latin1').decode(result);
+  expect(pdf).toContain('/Title (A field guide)');
+  expect(pdf).toContain('IBMPlexSans');
+  expect(pdf).toContain('/Subtype /Image');
+});

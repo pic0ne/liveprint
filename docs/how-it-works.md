@@ -73,11 +73,56 @@ The button left of the download buttons names the current paper, margins and the
 
 - Paper: A4 or US Letter. The first visit picks US Letter in the countries that use it and A4 elsewhere.
 - Margins: narrow (18 mm), normal (25 mm) or wide (35 mm).
-- Theme: Book (Libertinus Serif, justified, indented paragraphs), Paper (New Computer Modern, numbered sections, like a LaTeX article) or Modern (IBM Plex Sans, ragged right).
+- Theme: Book (Libertinus Serif, justified, indented paragraphs), Paper (New Computer Modern, numbered sections, like a LaTeX article), Modern (IBM Plex Sans, ragged right) or Custom, a prelude of your own.
 
 A choice applies to the preview and to **Download .pdf**, and the browser keeps it for the next visit. The theme preludes are in [`src/typst/themes/`](../src/typst/themes), and [`src/typst/themes.ts`](../src/typst/themes.ts) lists the fonts each needs.
 
 Book uses the fonts that load at start-up. Paper (2.2 MB of fonts) and Modern (890 KB) download their fonts when you first choose them, and the preview stays in the previous theme until they arrive, about 200 ms over loopback. If the download fails, the preview stays in the previous theme, the menu goes back to it, and a line says what failed. Choosing the theme again retries.
+
+## Custom theme
+
+The Custom theme typesets with a Typst prelude you load, a `.typ` file, and an optional logo. Choosing **Custom** in the menu asks for the file the first time. Once one is kept, a row under the themes names it and the logo, with **Replace…**, **Logo…** (PNG, JPEG, GIF, WebP or SVG) and **Remove**. Removing the prelude while Custom is shown goes back to Book.
+
+The prelude and the logo belong to the browser, like the page settings, so every document can use them. They are kept in an IndexedDB database of their own, `liveprint-theme`, so they survive a reload and work offline. A new version of the documents' database would have to wait while any tab of an older build holds it open, and a separate database needs no new version. The logo is kept as bytes, for the WebKit reason the Files section gives.
+
+Before the worker uses a prelude, it compiles it on its own with an empty document. If that fails, the preview stays in the theme it had, the menu goes back to it, and a line names the file and the first error, with the line number counted in your file, for example `Could not use company.typ: line 3: unknown variable: foo`. Choosing Custom again retries. An error that only a real document triggers shows as any failed compile does.
+
+A prelude can set text in any bundled family, so Custom loads every theme's fonts: Libertinus Serif, New Computer Modern, New Computer Modern Math, IBM Plex Sans, IBM Plex Sans SmBld, IBM Plex Mono and DejaVu Sans Mono. The first time, that downloads Paper's and Modern's fonts, 3.1 MB, and a failed download behaves as it does for those themes. The only package is `@preview/mitex`, which liveprint bundles for formulas. Any other import fails, since there is no network to fetch it from.
+
+The prelude runs after the page settings and base.typ, and before the document. It reads the `liveprint` dictionary:
+
+- `paper`: `"a4"` or `"us-letter"`.
+- `margin`: the margin chosen, as a length.
+- `title`: the front matter's title, or `none`.
+- `authors`: an array of names, empty when there are none.
+- `date`: a `datetime` for a calendar date, the text as written for any other, or `none`.
+- `logo`: the logo's path, to pass to `image`, or `none`. Every theme gets it, so a built-in theme ignores it.
+
+base.typ gives it these functions:
+
+- `title-block(title:, authors:, date:)` prints the front matter at the top of the document. Redefine it with `#let` to restyle the title block.
+- `running-head(format)` is the title, or the date in `format` when there is no title, or `none`.
+- `date-text(date, format)` prints a `date` in `format` when it is a `datetime`, and as written otherwise.
+- `typed-math(code)` shows a formula that does not compile yet, and `task(done, body)` a task list item. The document calls both, and a prelude can redefine them.
+- `linked-image(img)` wraps every image with the marks that image linking reads. Leave it as it is.
+
+The logo goes to the worker as an image at `/images/.liveprint/logo.png`, with the extension of its type. No Markdown image can name a path under `.liveprint`, so the logo is never one of a document's images, never kept with its record, saved beside its file or counted in the image notice. An SVG logo is drawn for the preview as SVG images are.
+
+This prelude sets Plex Sans, puts the title and the logo in each page's header, and prints a plainer title block:
+
+```typst
+#set text(font: "IBM Plex Sans", size: 10.5pt)
+#set page(header: {
+  if liveprint.title != none { liveprint.title }
+  h(1fr)
+  if liveprint.logo != none { image(liveprint.logo, height: 0.8cm) }
+})
+#let title-block(title: none, authors: (), date: none) = block(below: 1.5em, {
+  if title != none { text(size: 2em, weight: "bold", title) }
+  if authors.len() > 0 { linebreak() + authors.join(", ") }
+  if date != none { linebreak() + date-text(date, "[day padding:none] [month repr:long] [year]") }
+})
+```
 
 ## Front matter
 
