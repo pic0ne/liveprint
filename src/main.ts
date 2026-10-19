@@ -137,8 +137,10 @@ function useSettings(next: PageSettings): void {
 }
 
 /** The custom theme the browser keeps. Its prelude is the newest the worker took. */
+let customRead = true;
 let custom = await readCustomTheme().catch((error) => {
   last.fileFailure = `Could not read the custom theme: ${message(error)}`;
+  customRead = false;
   return null;
 });
 let customId = 0;
@@ -241,7 +243,9 @@ if (custom) {
   const id = sendCustom(custom.prelude);
   if (settings.theme === 'custom') choosing = { id, retry: 'Choose Custom again' };
 } else if (settings.theme === 'custom') {
-  keepSettings({ ...settings, theme: 'book' });
+  // A read that failed leaves the reader's choice stored for the next visit.
+  if (customRead) keepSettings({ ...settings, theme: 'book' });
+  else settings = { ...settings, theme: 'book' };
 }
 send({ kind: 'settings', settings });
 const menu = new SettingsMenu($('settings'), settings, menuActions);

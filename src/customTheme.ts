@@ -1,3 +1,5 @@
+import { completed } from './restore';
+
 // The custom theme, kept in a database of its own: a new version of the documents' database would wait, blocked,
 // while a tab of an older build holds it open. It belongs to the browser, like the page settings, not to a document.
 const DB = 'liveprint-theme';
@@ -26,12 +28,27 @@ export const logoBlob = (logo: Logo) => new Blob([logo.bytes], { type: logo.type
 
 let db: Promise<IDBDatabase> | null = null;
 
+/**
+ * The connection, opened once. It closes when a newer build asks for a new version, so that build is not blocked
+ * while this tab stays open, and a failed or closed one is opened again on the next call.
+ */
 function open(): Promise<IDBDatabase> {
-  db ??= new Promise((resolve, reject) => {
+  db ??= new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const connection = request.result;
+      connection.onversionchange = () => {
+        connection.close();
+        db = null;
+      };
+      connection.onclose = () => (db = null);
+      resolve(connection);
+    };
     request.onerror = () => reject(request.error);
+  }).catch((error: unknown) => {
+    db = null;
+    throw error;
   });
   return db;
 }
@@ -60,9 +77,11 @@ export async function readCustomTheme(): Promise<CustomTheme | null> {
   return parse(await done((await open()).transaction(STORE).objectStore(STORE).get(KEY)));
 }
 
-/** Keeps the custom theme, or removes it for null. */
+/** Keeps the custom theme, or removes it for null. Resolves once the write is committed, which a full disk can still abort. */
 export async function keepCustomTheme(theme: CustomTheme | null): Promise<void> {
-  const store = (await open()).transaction(STORE, 'readwrite').objectStore(STORE);
-  if (theme) await done(store.put(theme, KEY));
-  else await done(store.delete(KEY));
+  const transaction = (await open()).transaction(STORE, 'readwrite');
+  const store = transaction.objectStore(STORE);
+  if (theme) store.put(theme, KEY);
+  else store.delete(KEY);
+  await completed(transaction);
 }

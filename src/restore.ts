@@ -50,7 +50,7 @@ const done = <T>(request: IDBRequest<T>) =>
     request.onerror = () => reject(request.error);
   });
 
-const completed = (transaction: IDBTransaction) =>
+export const completed = (transaction: IDBTransaction) =>
   new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
     transaction.onerror = transaction.onabort = () => reject(transaction.error);
