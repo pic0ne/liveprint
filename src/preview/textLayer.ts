@@ -39,8 +39,9 @@ export function fillLayer(layer: HTMLElement, { width, height, runs }: TextPage)
       return span;
     }),
     // Behind the runs, so a drag between two lines is over it rather than over the layer, whose position Chrome
-    // can take for the drag's start: the selection then follows the pointer instead of growing.
-    Object.assign(document.createElement('div'), { className: 'text-end' }),
+    // can take for the drag's start: the selection then follows the pointer instead of growing. The same one stays,
+    // since a file dropped on a node the new text replaced would go to a node no longer in the page.
+    layer.querySelector(':scope > .text-end') ?? Object.assign(document.createElement('div'), { className: 'text-end' }),
   );
 }
 
