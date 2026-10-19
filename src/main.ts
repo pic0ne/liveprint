@@ -142,20 +142,26 @@ let custom = await readCustomTheme().catch((error) => {
   return null;
 });
 let customId = 0;
-/**
- * The prelude sent to the worker that Custom is chosen with once the worker takes it, and the way to retry it that a
- * failure names. Only the newest counts.
- */
-let trying: { id: number; prelude: Prelude; retry: string } | null = null;
+/** Preludes sent to the worker, by id. It answers them in order, takes each that compiles, and skips any a newer one replaced. */
+const asked = new Map<number, Prelude | null>();
+/** The request that chooses Custom once the worker takes its prelude, and how its failure line says to retry. */
+let choosing: { id: number; retry: string } | null = null;
 
 function sendCustom(prelude: Prelude | null): number {
-  send({ kind: 'custom', id: ++customId, prelude });
+  asked.set(++customId, prelude);
+  send({ kind: 'custom', id: customId, prelude });
   return customId;
 }
 
-/** Sends the prelude, and chooses Custom when the worker takes it. */
+/** The prelude of answered request `id`, forgetting it and the older ones the worker skipped. */
+function answered(id: number): Prelude | null | undefined {
+  const prelude = asked.get(id);
+  for (const older of asked.keys()) if (older <= id) asked.delete(older);
+  return prelude;
+}
+
 function tryPrelude(prelude: Prelude, retry: string): void {
-  trying = { id: sendCustom(prelude), prelude, retry };
+  choosing = { id: sendCustom(prelude), retry };
 }
 
 const customFiles = (theme: CustomTheme | null) => theme && { prelude: theme.prelude.name, logo: theme.logo?.name ?? null };
@@ -192,8 +198,9 @@ const menuActions = {
       last.themeFailure = '';
       drawOverlay();
     }
+    if (next.theme !== 'custom') choosing = null;
     if (next.theme !== 'custom' || settings.theme === 'custom') useSettings(next);
-    else if (trying) useSettings({ ...next, theme: settings.theme });
+    else if (choosing) useSettings({ ...next, theme: settings.theme });
     else void chooseCustom().catch(themeFileFailed);
   },
   replacePrelude() {
@@ -211,7 +218,7 @@ const menuActions = {
       .catch(themeFileFailed);
   },
   removePrelude() {
-    trying = null;
+    choosing = null;
     sendCustom(null);
     void keepCustom(null);
     if (settings.theme === 'custom') useSettings({ ...settings, theme: 'book' });
@@ -232,7 +239,7 @@ function themeFileFailed(error: unknown): void {
 if (custom) {
   await workerImages.showLogo(custom.logo ? logoBlob(custom.logo) : null);
   const id = sendCustom(custom.prelude);
-  if (settings.theme === 'custom') trying = { id, prelude: custom.prelude, retry: 'Choose Custom again' };
+  if (settings.theme === 'custom') choosing = { id, retry: 'Choose Custom again' };
 } else if (settings.theme === 'custom') {
   keepSettings({ ...settings, theme: 'book' });
 }
@@ -669,9 +676,10 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
         const name = themeOf(data.theme).label;
         last.themeFailure = `Could not download the ${name} fonts: ${reason.message}. Choose ${name} again to retry.`;
       } else {
-        if (reason.id !== trying?.id) break;
-        last.themeFailure = `Could not use ${reason.name}: ${reason.error}. ${trying.retry} to retry.`;
-        trying = null;
+        answered(reason.id);
+        if (reason.id !== choosing?.id) break;
+        last.themeFailure = `Could not use ${reason.name}: ${reason.error}. ${choosing.retry} to retry.`;
+        choosing = null;
       }
       if (data.theme === settings.theme) keepSettings({ ...settings, theme: data.showing });
       menu.select(settings);
@@ -679,13 +687,15 @@ function fromWorker({ data }: MessageEvent<FromWorker>): void {
       break;
     }
     case 'custom': {
-      if (data.id !== trying?.id) break;
-      const { prelude } = trying;
-      trying = null;
-      if (prelude !== custom?.prelude) void keepCustom({ prelude, logo: custom?.logo ?? null });
-      last.themeFailure = '';
+      const prelude = answered(data.id);
+      if (prelude === undefined) break;
+      // The worker typesets Custom with it now, whoever asked, so the browser keeps the same.
+      if (prelude !== (custom?.prelude ?? null)) void keepCustom(prelude && { prelude, logo: custom?.logo ?? null });
       // The same document and settings can print differently now, so the cursor's spot is asked again.
       located = null;
+      if (data.id !== choosing?.id) break;
+      choosing = null;
+      last.themeFailure = '';
       if (settings.theme !== 'custom') useSettings({ ...settings, theme: 'custom' });
       menu.select(settings);
       drawOverlay();

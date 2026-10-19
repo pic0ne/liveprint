@@ -192,7 +192,7 @@ async function applySettings(next: PageSettings): Promise<boolean> {
   return true;
 }
 
-const failed = (theme: ThemeId, reason: ThemeFailure) => post({ kind: 'themeFailed', theme, showing: applied?.theme ?? 'book', reason });
+const failed = (theme: ThemeId, reason: ThemeFailure, showing: ThemeId = applied?.theme ?? 'book') => post({ kind: 'themeFailed', theme, showing, reason });
 
 /** A path of its own, so the document's main.typ, which the PDF and the image marks compile, stays as it is. */
 const CHECK_PATH = '/prelude.typ';
@@ -216,7 +216,9 @@ async function applyCustom({ id, prelude }: CustomRequest): Promise<boolean> {
       error = errorText(e);
     }
     if (error !== null) {
-      failed('custom', { kind: 'prelude', id, name: prelude.name, error });
+      // The prelude before stays, so the settings asked for last still apply, unless they want Custom and there is none.
+      const target = wanted?.theme ?? 'book';
+      failed('custom', { kind: 'prelude', id, name: prelude.name, error }, target === 'custom' && !custom ? (applied?.theme ?? 'book') : target);
       return false;
     }
   }

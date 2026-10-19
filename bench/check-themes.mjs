@@ -331,6 +331,18 @@ await load('custom');
 s = await custom();
 check('a reload keeps the custom theme and its logo', s.shown === 'custom' && s.checked === 'custom' && s.logo && J(s.row) === J(['company.typ', 'logo.png']) && s.failure === '', s);
 
+// Both clicks land before the worker can answer the first, as when the reader moves on while it is busy.
+await evaluate(`(() => {
+  if (document.querySelector('.settings-panel').hidden) document.querySelector('#settings > button').click();
+  for (const theme of ['book', 'custom', 'paper']) document.querySelector(\`input[name=theme][value=\${theme}]\`).click();
+})()`);
+await settledIn('paper');
+await sleep(500);
+s = await custom();
+check('choosing another theme before the worker takes the prelude keeps that theme', s.shown === 'paper' && s.checked === 'paper' && s.stored === 'paper' && J(s.row) === J(['company.typ', 'logo.png']), s);
+await inMenu(CUSTOM);
+await settledIn('custom');
+
 await stopServer();
 await load('custom');
 s = await custom();
