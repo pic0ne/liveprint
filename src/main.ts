@@ -424,6 +424,8 @@ async function openDoc(doc: Doc, kept = false): Promise<void> {
   referenced = [];
   looked = new Set();
   opening = true;
+  // Pages of the document it replaces, still on their way, are then a rev behind.
+  rev = nextRev(rev);
   const shown = kept ? showImages(doc.images) : setImages(doc.images);
   load(doc.text);
   $('pages').scrollTop = 0;
