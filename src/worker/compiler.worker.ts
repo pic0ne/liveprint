@@ -211,7 +211,7 @@ async function applyCustom({ id, prelude }: CustomRequest): Promise<boolean> {
     try {
       compiler.addSource(CHECK_PATH, mainSource(preludeFor(settings, null, source), ''));
       const { result, diagnostics = [] } = await compiler.compile({ mainFilePath: CHECK_PATH, diagnostics: 'full' });
-      error = result ? null : (preludeError(settings, source, diagnostics) ?? 'it does not compile');
+      error = result ? null : (preludeError(settings, source, diagnostics, CHECK_PATH) ?? 'it does not compile');
     } catch (e) {
       error = errorText(e);
     }

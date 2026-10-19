@@ -47,10 +47,13 @@ test('preludeFor ends the Custom theme with the user\'s prelude, and gives every
 test('preludeError counts the line of an error in the user\'s file, and names none for an error outside it', () => {
   const settings = { paper: 'us-letter', margins: 'wide', theme: 'custom' } as const;
   const first = preludeFor(settings, null, company).split('\n').length - 2;
-  const at = (line: number, pkg = '') => [{ package: pkg, path: '/check.typ', severity: 'error', range: `${line}:5-${line}:8`, message: 'unknown variable: foo' }];
-  expect(preludeError(settings, company, at(first))).toBe('line 1: unknown variable: foo');
-  expect(preludeError(settings, company, at(first + 1))).toBe('line 2: unknown variable: foo');
-  expect(preludeError(settings, company, at(first - 1))).toBe('unknown variable: foo');
-  expect(preludeError(settings, company, at(first + 1, '@preview/mitex:0.2.6'))).toBe('unknown variable: foo');
-  expect(preludeError(settings, company, [{ ...at(first)[0]!, severity: 'warning' }])).toBeNull();
+  const at = (line: number, pkg = '', path = '/check.typ') => [{ package: pkg, path, severity: 'error', range: `${line}:5-${line}:8`, message: 'unknown variable: foo' }];
+  const error = (diagnostics: ReturnType<typeof at>, custom = company) => preludeError(settings, custom, diagnostics, '/check.typ');
+  expect(error(at(first))).toBe('line 1: unknown variable: foo');
+  expect(error(at(first + 1))).toBe('line 2: unknown variable: foo');
+  expect(error(at(first - 1))).toBe('unknown variable: foo');
+  expect(error(at(first + 1, '@preview/mitex:0.2.6'))).toBe('unknown variable: foo');
+  expect(error(at(first + 1, '', '/data.typ'))).toBe('unknown variable: foo');
+  expect(error([{ ...at(first)[0]!, severity: 'warning' }])).toBeNull();
+  expect(error(at(first + 1), { ...company, source: '#set text(size: 11pt)\r#let x = foo' })).toBe('line 2: unknown variable: foo');
 });

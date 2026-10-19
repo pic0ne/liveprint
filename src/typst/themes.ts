@@ -143,15 +143,15 @@ export function preludeFor(settings: PageSettings, front: FrontMatter | null = n
 }
 
 /**
- * The first error of the custom prelude compiled in the Custom theme with no front matter, as "line 3: unknown
- * variable: foo", its line counted in the user's file. An error outside that file, in base.typ or a package, names
- * no line. Null when there is no error.
+ * The first error of the custom prelude compiled at `path` in the Custom theme with no front matter, as "line 3:
+ * unknown variable: foo", its line counted in the user's file. An error outside it, in base.typ, a package or a file
+ * it reads, names no line. Null when there is no error.
  */
-export function preludeError(settings: PageSettings, custom: CustomSource, diagnostics: Diagnostic[]): string | null {
+export function preludeError(settings: PageSettings, custom: CustomSource, diagnostics: Diagnostic[], path: string): string | null {
   const error = diagnostics.find((d) => d.severity === 'error');
   if (!error) return null;
   const start = head(settings, null, custom).split('\n').length - 1;
   const at = /^(\d+):/.exec(error.range);
-  const line = at && !error.package ? Number(at[1]) - start + 1 : 0;
-  return line >= 1 && line <= custom.source.split('\n').length ? `line ${line}: ${error.message}` : error.message;
+  const line = at && !error.package && error.path === path ? Number(at[1]) - start + 1 : 0;
+  return line >= 1 && line <= custom.source.split(/\r\n|\r|\n/).length ? `line ${line}: ${error.message}` : error.message;
 }
