@@ -35,6 +35,8 @@ test.each([
   '   ',
   '.',
   '?x',
+  '.liveprint/logo.png',
+  './.liveprint/logo.svg',
 ])('%j is not a local image', (url) => {
   expect(imagePath(url)).toBeNull();
 });

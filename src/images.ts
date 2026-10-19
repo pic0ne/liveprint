@@ -9,14 +9,17 @@ function decoded(text: string): string {
   }
 }
 
-/** Parses a Markdown image URL. Null for remote or data URLs, absolute paths, and paths that leave the folder. */
+/** Where the worker keeps the images liveprint adds itself, which no document can name. */
+const OWN_FOLDER = '.liveprint';
+
+/** Parses a Markdown image URL. Null for remote or data URLs, absolute paths, paths that leave the folder, and liveprint's own. */
 export function imagePath(url: string): ImagePath | null {
   const bare = url.trim().replace(/^<(.*)>$/, '$1').replace(/[?#].*$/, '');
   if (/^[a-z][a-z0-9+.-]*:/i.test(bare) || bare.startsWith('/')) return null;
   const segments = decoded(bare)
     .split('/')
     .filter((segment) => segment !== '.');
-  if (segments.length === 0 || segments.some((segment) => segment === '' || segment === '..')) return null;
+  if (segments.length === 0 || segments[0] === OWN_FOLDER || segments.some((segment) => segment === '' || segment === '..')) return null;
   return segments.join('/') as ImagePath;
 }
 
@@ -40,6 +43,11 @@ export function withExtension(name: string, type: string): string {
   const ext = /\.([^.]*)$/.exec(name)?.[1]?.toLowerCase();
   return !extensions || (ext !== undefined && extensions.includes(ext)) ? name : `${name}.${extensions[0]}`;
 }
+
+/** The custom theme's logo among the worker's images. The extension tells Typst its format. */
+export const logoPath = (type: string) => `${OWN_FOLDER}/${withExtension('logo', type)}` as ImagePath;
+
+export const isLogoPath = (path: ImagePath) => path.startsWith(`${OWN_FOLDER}/`);
 
 /** A free name for an inserted image: its file name with spaces and unsafe characters made "-", then "-2", "-3"... Unicode letters stay. */
 export function freeName(name: string, taken: (path: ImagePath) => boolean): ImagePath {
