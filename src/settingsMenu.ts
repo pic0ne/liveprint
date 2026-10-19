@@ -73,8 +73,8 @@ export class SettingsMenu {
     const names = Object.assign(document.createElement('span'), { className: 'custom-files' });
     names.append(this.#preludeName, this.#logo);
     const remove = button('Remove', () => {
-      this.#panel.querySelector<HTMLInputElement>('input[name=theme]:checked')?.focus();
       actions.removePrelude();
+      this.#panel.querySelector<HTMLInputElement>('input[name=theme]:checked')?.focus();
     });
     this.#custom.setAttribute('role', 'group');
     this.#custom.append(names, button('Replace…', actions.replacePrelude), this.#logoButton, remove);

@@ -364,7 +364,8 @@ check('removing the logo takes it off the page and out of the row', !s.logo && J
 await inMenu(rowButton('Remove'));
 await settledIn('book');
 s = await custom();
-check('removing the prelude brings Book back and hides the row', s.shown === 'book' && s.checked === 'book' && s.stored === 'book' && s.row === null, s);
+const focused = await evaluate(`document.activeElement.matches('input[name=theme][value=book]')`);
+check('removing the prelude brings Book back, hides the row and leaves focus on Book', s.shown === 'book' && s.checked === 'book' && s.stored === 'book' && s.row === null && focused, { s, focused });
 await load();
 s = await custom();
 check('a reload after removing it starts in Book with no custom theme', s.shown === 'book' && s.row === null && s.failure === '', s);
