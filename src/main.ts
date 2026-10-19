@@ -287,12 +287,17 @@ async function showImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   await workerImages.show(next);
 }
 
+/** Image writes, one at a time, so an older set never lands after a newer one, and a record is let go after its last. */
+let imagesKept = Promise.resolve();
 async function setImages(next: ReadonlyMap<ImagePath, Blob>): Promise<void> {
   if (docId) {
-    keepImages(docId, next).catch((error) => {
-      last.fileFailure = `Could not keep the images of ${file.name} in this browser: ${message(error)}`;
-      drawOverlay();
-    });
+    const [id, name] = [docId, file.name];
+    imagesKept = imagesKept
+      .then(() => keepImages(id, next))
+      .catch((error) => {
+        last.fileFailure = `Could not keep the images of ${name} in this browser: ${message(error)}`;
+        drawOverlay();
+      });
   }
   await showImages(next);
 }
@@ -381,9 +386,12 @@ const openRecent = ({ id, name }: Recent) =>
     const doc = await takeDoc(id);
     if (!doc) throw new Error('it is open in another tab');
     docId = id;
-    await openDoc(doc, true);
-    await keeping;
-    letGo(left);
+    try {
+      await openDoc(doc, true);
+    } finally {
+      await Promise.all([keeping, imagesKept]);
+      letGo(left);
+    }
   }).then(checkDisk);
 new RecentMenu($('recent'), () => (docId ? recentDocs(docId) : Promise.resolve([])), (recent) => void openRecent(recent));
 

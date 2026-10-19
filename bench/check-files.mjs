@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { crc32 } from 'node:zlib';
 import { launch, sleep, until } from './cdp.mjs';
 
 const { values: args } = parseArgs({ options: { shots: { type: 'string' } } });
@@ -89,29 +90,29 @@ const opfsRead = (name) => evaluate(`(async () => (await (await (await navigator
 /**
  * Records each edit sent to the worker and the newest pages message, so a check can wait for the preview. `__hold`
  * stops the open picker, the read of a dropped file or the reading of image bytes until `__release`, so a check can
- * type while an open is in progress.
+ * type while an open is in progress. A hold of bytes given a size stops only the reading of blobs that size.
  */
 const WATCH_WORKER = `
   window.__pages = { sent: -1, rev: -1, final: false, readyAt: NaN };
   window.__holds = {};
-  window.__hold = (name) => {
+  window.__hold = (name, size) => {
     let release;
     const promise = new Promise((resolve) => (release = resolve));
-    __holds[name] = { promise, release, reached: 0 };
+    __holds[name] = { promise, release, reached: 0, size };
   };
   window.__release = (name) => {
     __holds[name]?.release();
     delete __holds[name];
   };
-  window.__held = async (name) => {
+  window.__held = async (name, size) => {
     const hold = __holds[name];
-    if (!hold) return;
+    if (!hold || (hold.size !== undefined && hold.size !== size)) return;
     hold.reached++;
     await hold.promise;
   };
   const arrayBuffer = Blob.prototype.arrayBuffer;
   Blob.prototype.arrayBuffer = async function () {
-    await __held('bytes');
+    await __held('bytes', this.size);
     return arrayBuffer.call(this);
   };
   const getHandle = DataTransferItem.prototype.getAsFileSystemHandle;
@@ -355,6 +356,15 @@ async function drop(paths, at) {
 const DROPPED = '# Dropped\n\nFrom the desktop.\n';
 writeFileSync(join(dir, 'dropped.md'), DROPPED);
 const png = join(dir, 'photo.png');
+/** `bytes`, a PNG, with one more chunk before its end: the same picture, other bytes. */
+function withChunk(bytes, type, data) {
+  const body = Buffer.concat([Buffer.from(type, 'latin1'), Buffer.from(data, 'latin1')]);
+  const chunk = Buffer.alloc(body.length + 8);
+  chunk.writeUInt32BE(data.length, 0);
+  body.copy(chunk, 4);
+  chunk.writeUInt32BE(crc32(body), body.length + 4);
+  return Buffer.concat([bytes.subarray(0, -12), chunk, bytes.subarray(-12)]);
+}
 writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
 
 dialogs.length = 0;
@@ -562,6 +572,38 @@ await clickAt(await rowAt('Tab A again. Unsaved.'));
 await until('the left document open again', async () => (await state()).name === 'dropped.md');
 s = await state();
 check('it opens back with that text intact, still Edited', s.text === 'Tab A again. Unsaved.' && s.edited && s.failure === '', s);
+
+// The record's write reads every image again, the worker only the new one, so holding blobs of the first image's
+// size holds the write alone.
+const keptImagePaths = (id) =>
+  evaluate(`new Promise((resolve) => {
+    indexedDB.open('liveprint').onsuccess = ({ target: { result: db } }) => {
+      db.transaction('images').objectStore('images').getAllKeys(IDBKeyRange.bound([${J(id)}], [${J(id)}, []])).onsuccess = ({ target }) => {
+        db.close();
+        resolve(target.result.map(([, path]) => path));
+      };
+    };
+  })`);
+const lockHeld = (id) => evaluate(`navigator.locks.query().then(({ held }) => held.some((lock) => lock.name === ${J(`liveprint-doc-${id}`)}))`);
+const left = await docId(evaluate);
+await drop(png, await box('.cm-content'));
+await until('photo.png inserted', async () => (await state()).text.includes('![](photo.png)'));
+await settled();
+const signed = join(dir, 'signed.png');
+writeFileSync(signed, withChunk(readFileSync(png), 'tEXt', 'Comment\0liveprint'));
+await evaluate(`__hold('bytes', ${readFileSync(png).length})`);
+await drop(signed, await box('.cm-content'));
+await holding('bytes');
+await until('signed.png inserted', async () => (await state()).text.includes('![](signed.png)'));
+await showRecent();
+await clickAt(await rowAt('Tab B.'));
+await until('the recent document open', async () => (await state()).text === 'Tab B.');
+await sleep(300);
+const heldWhileWriting = await lockHeld(left);
+await evaluate(`__release('bytes')`);
+await until('the left record let go', async () => !(await lockHeld(left)));
+const keptPaths = await keptImagePaths(left);
+check('the document left stays held until its images are kept, the one inserted just before included', heldWhileWriting && keptPaths.includes('signed.png'), { heldWhileWriting, keptPaths });
 
 await showRecent();
 await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
