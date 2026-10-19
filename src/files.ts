@@ -62,13 +62,18 @@ export async function openFile(): Promise<Doc | null> {
       throw error;
     }
   }
-  const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.md,.markdown,text/markdown,text/plain' });
-  const file = await new Promise<File | null>((resolve) => {
+  const file = await pickFile('.md,.markdown,text/markdown,text/plain');
+  return file ? readCopy(file) : null;
+}
+
+/** Asks for one file through a file input, of the types `accept` lists. Null when the user cancels. */
+export function pickFile(accept: string): Promise<File | null> {
+  const input = Object.assign(document.createElement('input'), { type: 'file', accept });
+  return new Promise((resolve) => {
     input.addEventListener('change', () => resolve(input.files?.[0] ?? null));
     input.addEventListener('cancel', () => resolve(null));
     input.click();
   });
-  return file ? readCopy(file) : null;
 }
 
 const allowed = async (handle: FileSystemHandle, mode: Mode['mode']) => !handle.queryPermission || (await handle.queryPermission({ mode })) === 'granted';
