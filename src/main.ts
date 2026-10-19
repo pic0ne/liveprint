@@ -267,9 +267,11 @@ window.addEventListener('beforeunload', (e) => {
   if (isEdited(editor.state.doc.toString(), file)) e.preventDefault();
 });
 
+/** While an opened document's images go to the worker, its edits wait, so the worker never compiles it without them. */
+let opening = false;
 function compile(markdown: string): void {
   rev = nextRev(rev);
-  send({ kind: 'edit', rev, markdown });
+  if (!opening) send({ kind: 'edit', rev, markdown });
 }
 
 function changed(markdown: string): void {
@@ -306,12 +308,17 @@ async function openDoc(doc: Doc, kept = false): Promise<void> {
   watchDisk();
   referenced = [];
   looked = new Set();
+  opening = true;
   const shown = kept ? showImages(doc.images) : setImages(doc.images);
   load(doc.text);
   $('pages').scrollTop = 0;
   showFile(doc.text);
-  await shown;
-  (kept ? compile : changed)(editor.state.doc.toString());
+  try {
+    await shown;
+  } finally {
+    opening = false;
+    (kept ? compile : changed)(editor.state.doc.toString());
+  }
 }
 
 /** Inserts `![](path)` for each image file at `at`, or over the selection. Other files are named in the failure line. */

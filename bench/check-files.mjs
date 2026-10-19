@@ -423,13 +423,16 @@ answers.length = 0;
 dialogs.length = 0;
 await drop([join(dir, 'dropped.md'), png], await box('#pages'));
 await holding('bytes');
+const sentBefore = await evaluate('__pages.sent');
 await cursorToEnd();
 await type(' Typed.');
+const sentWhileHeld = await evaluate('__pages.sent');
 await evaluate(`__release('bytes')`);
 await until('dropped.md open', async () => (await state()).name === 'dropped.md');
 await settled();
 s = await state();
 check('text typed while a dropped file’s images load goes into the opened file and stays', s.text === `${DROPPED} Typed.` && s.edited && dialogs.length === 0, { dialogs, s });
+check('the worker gets none of it before the images, and then compiles it without a failure', sentWhileHeld === sentBefore && s.failure === '' && s.pages > 0, { sentBefore, sentWhileHeld, s });
 
 console.log('\nSeveral tabs');
 const textIn = (ev) => ev(`${view}.state.doc.toString()`);
