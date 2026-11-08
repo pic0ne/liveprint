@@ -262,6 +262,7 @@ async function inMenu(expression) {
   await clickOn(expression);
 }
 const CUSTOM = `document.querySelector('.segments label:has(input[value=custom])')`;
+const ADD = `document.querySelector('.custom-start button')`;
 const rowButton = (text) => `[...document.querySelectorAll('.custom-row button')].find((b) => b.textContent === ${J(text)} && b.offsetParent)`;
 async function custom() {
   const c = await evaluate(`(async () => {
@@ -290,25 +291,27 @@ await load();
 
 // Headless Chrome cancels a file input it is not asked to intercept, as a reader closing the picker does.
 await page.send('Page.setInterceptFileChooserDialog', { enabled: false });
-await inMenu(CUSTOM);
+await inMenu(ADD);
 await sleep(500);
 await page.send('Page.setInterceptFileChooserDialog', { enabled: true });
 s = await custom();
-check('choosing Custom with nothing kept opens the file input, and cancelling it leaves Book chosen', s.checked === 'book' && s.stored !== 'custom' && s.row === null && s.failure === '', s);
+const offered = await evaluate(`({ radio: !!${CUSTOM}.offsetParent, add: !!${ADD}?.offsetParent })`);
+check('with nothing kept, Custom is no theme option but a button that opens the file input, and cancelling it leaves Book chosen', !offered.radio && offered.add && s.checked === 'book' && s.stored !== 'custom' && s.row === null && s.failure === '', { s, offered });
 
 picks.push(['broken.typ']);
-await inMenu(CUSTOM);
+await inMenu(ADD);
 await until('the broken prelude refused', () => evaluate('__preludeFailed.length > 0'));
 await sleep(300);
 s = await custom();
-check('a prelude with an error keeps Book, and the line names the file and the line in it', s.failure === 'Could not use broken.typ: line 3: unknown variable: foo. Choose Custom again to retry.' && s.checked === 'book' && s.stored !== 'custom' && s.shown === 'book' && s.row === null, s);
+check('a prelude with an error keeps Book, and the line names the file and the line in it', s.failure === 'Could not use broken.typ: line 3: unknown variable: foo. Choose Custom theme… again to retry.' && s.checked === 'book' && s.stored !== 'custom' && s.shown === 'book' && s.row === null, s);
 
 picks.push(['company.typ']);
 const before = choosers;
-await inMenu(CUSTOM);
+await inMenu(ADD);
 await settledIn('custom');
 s = await custom();
-check('choosing Custom again asks for a file again, and a good prelude applies', choosers === before + 1 && s.shown === 'custom' && s.checked === 'custom' && s.stored === 'custom' && s.failure === '' && J(s.row) === J(['company.typ']), s);
+const shownNow = await evaluate(`({ radio: !!${CUSTOM}.offsetParent, add: !!${ADD}?.offsetParent })`);
+check('choosing Custom theme… again asks for a file again, a good prelude applies, and Custom joins the themes', choosers === before + 1 && s.shown === 'custom' && s.checked === 'custom' && s.stored === 'custom' && s.failure === '' && J(s.row) === J(['company.typ']) && shownNow.radio && !shownNow.add, { s, shownNow });
 check('without a logo the header prints none', !s.logo, s);
 
 picks.push(['logo.png']);
@@ -365,7 +368,8 @@ await inMenu(rowButton('Remove'));
 await settledIn('book');
 s = await custom();
 const focused = await evaluate(`document.activeElement.matches('input[name=theme][value=book]')`);
-check('removing the prelude brings Book back, hides the row and leaves focus on Book', s.shown === 'book' && s.checked === 'book' && s.stored === 'book' && s.row === null && focused, { s, focused });
+const afterRemove = await evaluate(`({ radio: !!${CUSTOM}.offsetParent, add: !!${ADD}?.offsetParent })`);
+check('removing the prelude brings Book back, hides the row and Custom, offers the button again and leaves focus on Book', s.shown === 'book' && s.checked === 'book' && s.stored === 'book' && s.row === null && focused && !afterRemove.radio && afterRemove.add, { s, focused, afterRemove });
 await load();
 s = await custom();
 check('a reload after removing it starts in Book with no custom theme', s.shown === 'book' && s.row === null && s.failure === '', s);

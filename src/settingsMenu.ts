@@ -28,6 +28,7 @@ export interface CustomFiles {
 /** What the reader asks of the menu. Each file action runs in the click, which a file input needs. */
 export interface SettingsActions {
   change(settings: PageSettings): void;
+  addPrelude(): void;
   replacePrelude(): void;
   chooseLogo(): void;
   removePrelude(): void;
@@ -42,13 +43,16 @@ const button = (textContent: string, onClick: () => void) => {
 
 /**
  * The top bar's page settings: a button that names the current choice and opens a panel of segmented radio groups.
- * A change applies at once. Each theme's name is set in its own face, loaded the first time the panel opens. Under
- * the themes, a row names the custom theme's prelude and logo once one is kept.
+ * A change applies at once. Each theme's name is set in its own face, loaded the first time the panel opens. Custom
+ * joins the themes only once a prelude is kept, so that no radio opens a file picker; until then a button under them
+ * asks for one. Once one is kept, a row there names the prelude and the logo.
  */
 export class SettingsMenu {
   readonly #button: HTMLButtonElement;
   readonly #panel: HTMLElement;
   readonly #custom = Object.assign(document.createElement('div'), { className: 'custom-row', hidden: true });
+  readonly #start = Object.assign(document.createElement('div'), { className: 'custom-start' });
+  readonly #customOption: HTMLElement;
   readonly #preludeName = Object.assign(document.createElement('span'), { className: 'custom-name' });
   readonly #logo = Object.assign(document.createElement('span'), { className: 'custom-logo' });
   readonly #logoName = Object.assign(document.createElement('span'), { className: 'custom-name' });
@@ -78,7 +82,13 @@ export class SettingsMenu {
     });
     this.#custom.setAttribute('role', 'group');
     this.#custom.append(names, button('Replace…', actions.replacePrelude), this.#logoButton, remove);
-    this.#panel.querySelector('fieldset:last-child')!.append(this.#custom);
+    const add = button('Custom theme…', actions.addPrelude);
+    const hint = Object.assign(document.createElement('span'), { className: 'custom-hint', id: 'custom-hint', textContent: 'A Typst prelude of your own, a .typ file' });
+    add.setAttribute('aria-describedby', hint.id);
+    this.#start.append(add, hint);
+    this.#customOption = this.#panel.querySelector<HTMLElement>('input[name=theme][value=custom]')!.parentElement!;
+    this.#panel.querySelector('fieldset:last-child')!.append(this.#custom, this.#start);
+    this.customFiles(null);
     this.#render();
 
     this.#panel.addEventListener('change', (e) => {
@@ -90,9 +100,10 @@ export class SettingsMenu {
     new Popover(root, this.#button, this.#panel, () => this.#open());
   }
 
-  /** Names the kept custom theme's files, or hides the row when none is kept. */
+  /** Names the kept custom theme's files and offers Custom, or else offers to add a prelude. */
   customFiles(files: CustomFiles | null): void {
-    this.#custom.hidden = files === null;
+    this.#custom.hidden = this.#customOption.hidden = files === null;
+    this.#start.hidden = files !== null;
     if (!files) return;
     this.#custom.setAttribute('aria-label', `Custom theme: ${files.prelude}${files.logo ? `, logo ${files.logo}` : ''}`);
     this.#preludeName.textContent = this.#preludeName.title = files.prelude;

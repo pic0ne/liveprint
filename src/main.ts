@@ -186,11 +186,17 @@ const pickPrelude = async (): Promise<Prelude | null> => {
   return file && { name: file.name, text: await file.text() };
 };
 
-/** A kept prelude is used as it is; without one, the reader picks a file. Cancelling leaves the theme as it was. */
-async function chooseCustom(): Promise<void> {
-  const prelude = custom?.prelude ?? (await pickPrelude());
-  if (prelude) tryPrelude(prelude, 'Choose Custom again');
+/** The menu offers Custom only once a prelude is kept, which is used as it is. */
+function chooseCustom(): void {
+  if (custom) tryPrelude(custom.prelude, 'Choose Custom again');
   else menu.select(settings);
+}
+
+/** A prelude the reader picks, shown at once whichever theme was chosen. Cancelling leaves the theme as it was. */
+function pickAndTryPrelude(retry: string): void {
+  void pickPrelude()
+    .then((prelude) => prelude && tryPrelude(prelude, retry))
+    .catch(themeFileFailed);
 }
 
 const menuActions = {
@@ -203,13 +209,10 @@ const menuActions = {
     if (next.theme !== 'custom') choosing = null;
     if (next.theme !== 'custom' || settings.theme === 'custom') useSettings(next);
     else if (choosing) useSettings({ ...next, theme: settings.theme });
-    else void chooseCustom().catch(themeFileFailed);
+    else chooseCustom();
   },
-  replacePrelude() {
-    void pickPrelude()
-      .then((prelude) => prelude && tryPrelude(prelude, 'Choose Replace… again'))
-      .catch(themeFileFailed);
-  },
+  addPrelude: () => pickAndTryPrelude('Choose Custom theme… again'),
+  replacePrelude: () => pickAndTryPrelude('Choose Replace… again'),
   chooseLogo() {
     void pickFile([...IMAGE_TYPES].join(','))
       .then(async (file) => {

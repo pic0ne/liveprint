@@ -425,12 +425,29 @@ button:focus-visible {
   min-height: 24px;
 }
 
+/* Until a prelude is kept: the button that asks for one, and what it is. */
+.custom-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 8px;
+  contain: inline-size;
+}
+
+.custom-hint {
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
 /* The bar's quiet grey is the dark panel's own, so in the panel they take the segments' track. */
-.custom-row button.quiet {
+.custom-row button.quiet,
+.custom-start button.quiet {
   background: var(--button);
 }
 
-.custom-row button.quiet:hover {
+.custom-row button.quiet:hover,
+.custom-start button.quiet:hover {
   background: var(--button-hover);
 }
 
@@ -449,6 +466,7 @@ button:focus-visible {
 }
 
 .custom-row[hidden],
+.custom-start[hidden],
 .custom-logo[hidden] {
   display: none;
 }
