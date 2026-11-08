@@ -9,6 +9,8 @@
   --editor: #fafafa;
   --divider: #e4e4e7;
   --divider-active: #c4c4c9;
+  /* The divider's grip, 3:1 on the divider. */
+  --grip: #7d7d85;
   --ground: #dcdce0;
   --ink: #18181b;
   --muted: #64646c;
@@ -42,6 +44,7 @@
     --editor: #1f1f22;
     --divider: #2a2a2e;
     --divider-active: #45454b;
+    --grip: #77777f;
     --ground: #2e2e33;
     --ink: #ececee;
     --muted: #8e8e96;
@@ -471,9 +474,23 @@ button.remove-logo {
 }
 
 .divider {
+  position: relative;
   background: var(--divider);
   cursor: col-resize;
   touch-action: none;
+}
+
+/* A short grip in the middle, so the strip reads as something to drag. */
+.divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 2px;
+  height: 28px;
+  margin-top: -14px;
+  border-radius: 1px;
+  background: var(--grip);
 }
 
 .divider:hover,
