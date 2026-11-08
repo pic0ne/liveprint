@@ -306,7 +306,8 @@ await setText('# Kept\n\n![](image.png)\n');
 await sleep(500);
 await page.send('Network.enable');
 const requested = [];
-const onRequest = ({ method, params }) => method === 'Network.requestWillBeSent' && requested.push(params.request.url);
+// A data: URL, such as a CSS mask's, is never fetched, so it cannot be the image coming back from a server.
+const onRequest = ({ method, params }) => method === 'Network.requestWillBeSent' && !params.request.url.startsWith('data:') && requested.push(params.request.url);
 page.listeners.add(onRequest);
 await load(() => page.send('Page.reload'));
 page.listeners.delete(onRequest);
