@@ -5,67 +5,97 @@
 }
 
 :root {
-  --bar: #f1f1f2;
-  --editor: #fafafa;
-  --divider: #e4e4e7;
-  --divider-active: #c4c4c9;
-  /* The divider's grip, 3:1 on the divider. */
-  --grip: #7d7d85;
-  --ground: #dcdce0;
-  --ink: #18181b;
-  --muted: #64646c;
-  --link: #1f56b8;
+  /* Galley grey: the proof's surround. The bar, the preview's ground, and the margin a shade darker. */
+  --bar: #dfe2e6;
+  --editor: #ffffff;
+  --divider: #d2d6db;
+  --divider-active: #c6cbd1;
+  --grip: #6d737b;
+  --ground: #dfe2e6;
+  /* The 1px rules that outline controls, the bar and the margin. */
+  --rule: #14161a;
+  --ink: #14161a;
+  --muted: #545a63;
+  --link: #2f55d4;
   --code: #0f6e5a;
-  --selection: #d5e0f5;
-  --button: #e4e4e7;
-  --button-hover: #d8d8dc;
-  --button-quiet: #ebebee;
-  --overlay: #fafafa;
+  --selection: #d6def7;
+  --button: #d2d6db;
+  --button-hover: #c6cbd1;
+  --button-quiet: #d2d6db;
+  --overlay: #ffffff;
   --failure: #9a3412;
-  --accent: #2563d0;
-  --accent-hover: #1f54b3;
+  /* The one filled button, in solid ink. */
+  --accent: #14161a;
+  --accent-hover: #30343b;
   --on-accent: #ffffff;
-  /* Focus rings and the checked segment's line: 3:1 on every grey they sit on, in both schemes. */
-  --focus: #2563d0;
+  /* The blue pencil: focus rings and the checked segment's line, 3:1 on every grey they sit on, in both schemes. */
+  --focus: #2f55d4;
+  /* The proofreader's red, kept for the marks that tie the Markdown to the page and nothing else. */
+  --mark: #d22d2d;
   --panel: #ffffff;
   /* A row under the pointer or focus in a panel. The muted text on it keeps 4.5:1 in both schemes. */
-  --panel-hover: #efeff1;
-  --panel-muted: #6b6b73;
+  --panel-hover: #eceef1;
+  --panel-muted: #5b616a;
   --segment-on: #ffffff;
   --paper: #ffffff;
   /* On the white page in both schemes. */
-  --page-selection: rgb(37 99 208 / 0.3);
+  --page-selection: rgb(47 85 212 / 0.3);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bar: #18181a;
-    --editor: #1f1f22;
-    --divider: #2a2a2e;
-    --divider-active: #45454b;
-    --grip: #77777f;
-    --ground: #2e2e33;
-    --ink: #ececee;
-    --muted: #8e8e96;
-    --link: #8db4f0;
+    --bar: #1b1e22;
+    --editor: #141619;
+    --divider: #24282d;
+    --divider-active: #30353b;
+    --grip: #7b828b;
+    --ground: #1b1e22;
+    --rule: #4b525b;
+    --ink: #e6e8eb;
+    --muted: #99a0a9;
+    --link: #93a9f5;
     --code: #7fcbb5;
-    --selection: #34405a;
-    --button: #2e2e33;
-    --button-hover: #3a3a40;
-    --button-quiet: #26262a;
-    --overlay: #1f1f22;
+    --selection: #2c3a64;
+    --button: #2a2e34;
+    --button-hover: #353a41;
+    --button-quiet: #24282d;
+    --overlay: #24282d;
     --failure: #f0a07a;
-    --accent: #2c6bd9;
-    --accent-hover: #245cc0;
-    --on-accent: #ffffff;
-    --focus: #6f9cf2;
-    --panel: #26262a;
-    --panel-hover: #323237;
-    --panel-muted: #9a9aa2;
-    --segment-on: #46464d;
+    --accent: #e6e8eb;
+    --accent-hover: #ffffff;
+    --on-accent: #14161a;
+    --focus: #7d97f7;
+    --mark: #ff6b61;
+    --panel: #24282d;
+    --panel-hover: #30353b;
+    --panel-muted: #a0a7b0;
+    --segment-on: #3c424a;
     color-scheme: dark;
   }
+}
+
+@font-face {
+  font-family: 'Archivo';
+  src: url('/ui-fonts/Archivo.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/ui-fonts/JetBrainsMono.woff2') format('woff2');
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/ui-fonts/JetBrainsMono-Italic.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: italic;
+  font-display: swap;
 }
 
 * {
@@ -83,7 +113,11 @@ body {
   flex-direction: column;
   background: var(--bar);
   color: var(--ink);
-  font: 14px/1.4 system-ui, sans-serif;
+  /* Longhands: the minifier writes a stretch into the shorthand as a percentage, which the shorthand does not take. */
+  font-family: Archivo, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  font-stretch: 87.5%;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -95,6 +129,7 @@ body {
   height: 48px;
   padding: 0 16px;
   background: var(--bar);
+  border-bottom: 1px solid var(--rule);
 }
 
 .doc {
@@ -114,6 +149,7 @@ body {
   min-width: 0;
   color: var(--ink);
   font-size: 14px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -153,6 +189,7 @@ button.quiet {
   padding: 0 8px;
   color: inherit;
   background: var(--button-quiet);
+  border-color: transparent;
 }
 
 button.quiet:hover {
@@ -166,14 +203,16 @@ button.quiet:hover {
   gap: 8px;
 }
 
+/* Ruled, square, and clear inside, like the boxes on a proof sheet. */
 button {
   height: 32px;
   padding: 0 12px;
   font: inherit;
+  font-weight: 600;
   color: var(--ink);
-  background: var(--button);
-  border: 0;
-  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -185,15 +224,18 @@ button:hover {
 #download-pdf {
   color: var(--on-accent);
   background: var(--accent);
-  font-weight: 500;
+  border-color: var(--accent);
 }
 
 #download-pdf:hover {
   background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 #settings > button {
   background: transparent;
+  border-color: transparent;
+  font-weight: 400;
 }
 
 #settings > button:hover,
@@ -220,18 +262,16 @@ button:focus-visible {
 /* Open and the button that lists the recent documents, joined as one control. */
 .recent {
   display: flex;
-  gap: 1px;
 }
 
 .recent > #open {
-  border-radius: 6px 0 0 6px;
+  border-right: 0;
 }
 
 .recent-toggle {
   display: grid;
   place-items: center;
   padding: 0 9px;
-  border-radius: 0 6px 6px 0;
 }
 
 .recent-toggle[aria-expanded='true'] {
@@ -249,8 +289,8 @@ button:focus-visible {
   display: grid;
   gap: 12px;
   padding: 12px;
-  border: 1px solid var(--divider);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: 0;
   background: var(--panel);
   box-shadow:
     0 10px 28px rgb(0 0 0 / 0.16),
@@ -271,6 +311,8 @@ button:focus-visible {
 }
 
 .recent-row {
+  border: 0;
+  font-weight: 400;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
@@ -278,7 +320,7 @@ button:focus-visible {
   width: 100%;
   height: auto;
   padding: 7px 10px;
-  border-radius: 4px;
+  border-radius: 0;
   background: transparent;
   text-align: left;
 }
@@ -356,7 +398,7 @@ button:focus-visible {
   display: flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--button);
 }
 
@@ -364,7 +406,7 @@ button:focus-visible {
   position: relative;
   flex: 1;
   padding: 5px 14px;
-  border-radius: 4px;
+  border-radius: 0;
   text-align: center;
   white-space: nowrap;
   cursor: pointer;
@@ -538,6 +580,7 @@ button.remove-logo {
 .page {
   position: relative;
   background: var(--paper);
+  outline: 1px solid var(--rule);
 }
 
 .page + .page {
@@ -590,7 +633,7 @@ button.remove-logo {
   bottom: 12px;
   max-width: calc(100% - 24px);
   padding: 10px 12px;
-  border-radius: 8px;
+  border: 1px solid var(--rule);
   background: var(--overlay);
   color: var(--ink);
   font-size: 12px;
@@ -666,7 +709,7 @@ button.remove-logo {
 
 @keyframes lp-jumped-a {
   from {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    background: color-mix(in srgb, var(--mark) 16%, transparent);
   }
   to {
     background: transparent;
@@ -675,7 +718,7 @@ button.remove-logo {
 
 @keyframes lp-jumped-b {
   from {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    background: color-mix(in srgb, var(--mark) 16%, transparent);
   }
   to {
     background: transparent;
@@ -686,7 +729,7 @@ button.remove-logo {
   .cm-line.lp-jumped-a,
   .cm-line.lp-jumped-b {
     animation: none;
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    background: color-mix(in srgb, var(--mark) 16%, transparent);
   }
 
   .segments label[data-loading] span {
