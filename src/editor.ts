@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory } 
 import { commonmarkLanguage, markdown } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, keymap } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, keymap, placeholder } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { markdownExtensions } from './markdown/parser';
 
@@ -23,6 +23,7 @@ const theme = EditorView.theme({
   '.cm-scroller': { fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: '14px', lineHeight: '1.65' },
   '.cm-content': { padding: '28px 32px 40vh', maxWidth: '72ch', caretColor: 'var(--ink)' },
   '.cm-cursor': { borderLeftColor: 'var(--ink)', borderLeftWidth: '2px' },
+  '.cm-placeholder': { color: 'var(--muted)' },
   // The browser's own selection, since the editor does not draw one: in the scheme's tint, not the system blue.
   '.cm-content ::selection, .cm-content::selection': { backgroundColor: 'var(--selection)' },
 });
@@ -92,6 +93,7 @@ export function createEditor(
     syntaxHighlighting(highlight),
     EditorView.lineWrapping,
     theme,
+    placeholder('Write Markdown here, or drop a .md file'),
     jumpedLine,
     // A dropped file is the app's to open or insert, instead of having its text inserted.
     EditorView.domEventHandlers({
