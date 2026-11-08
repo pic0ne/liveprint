@@ -34,6 +34,8 @@
   --mark: #ad1f1f;
   /* The same red on the white page, in both schemes. */
   --page-mark: #ad1f1f;
+  /* The leader crosses the grey and the white page, so it takes a red that holds 3:1 on both. */
+  --leader: #ad1f1f;
   --panel: #ffffff;
   /* A row under the pointer or focus in a panel. The muted text on it keeps 4.5:1 in both schemes. */
   --panel-hover: #eceef1;
@@ -69,6 +71,7 @@
     --on-accent: #14161a;
     --focus: #7d97f7;
     --mark: #ff6b61;
+    --leader: #d22d2d;
     --panel: #24282d;
     --panel-hover: #30353b;
     --panel-muted: #a0a7b0;
@@ -757,7 +760,7 @@ button.remove-logo {
 
 .proof-leader path {
   fill: none;
-  stroke: var(--mark);
+  stroke: var(--leader);
   stroke-width: 1;
 }
 
