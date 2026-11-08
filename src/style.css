@@ -371,8 +371,10 @@ button:focus-visible {
   background: var(--button-hover);
 }
 
+/* A line under the checked option as well as its fill, which alone sits too close to the track's grey. */
 .segments label:has(:checked) {
   background: var(--segment-on);
+  box-shadow: inset 0 -2px 0 var(--focus);
 }
 
 .segments input {
