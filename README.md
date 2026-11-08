@@ -1,6 +1,6 @@
 # liveprint
 
-A Markdown editor that typesets as you type. [Typst](https://typst.app) compiles each edit in the browser and redraws the changed pages in about 40 ms, so the preview is the PDF you download.
+A Markdown editor with a live [Typst](https://typst.app) PDF preview. Typst compiles each edit in the browser and redraws the changed pages in about 40 ms. The PDF you download matches the preview.
 
 It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 
@@ -14,7 +14,7 @@ It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 - Start a document with YAML front matter. Its `title`, `author` and `date` print as a title block and fill in the PDF's details.
 - Pages after the first carry the title or date in a running header, set in the theme's style.
 - Add footnotes with `[^1]` and a table of contents with a `[[toc]]` line. Clicks on either go to their Markdown.
-- Choose the Book, Paper, or Modern theme, A4 or US Letter, and narrow, normal, or wide margins. The choice applies to the preview and the PDF.
+- Choose the Book, Paper, or Modern theme, A4 or US Letter, and narrow, normal, or wide margins.
 - Load a Typst prelude of your own, with a logo, as a Custom theme. The browser keeps it for every document.
 - Open and save `.md` files on disk. Pasted images are saved beside the file, as VS Code does.
 - Go back to a recent document from the menu beside Open. The browser keeps the 10 newest, unsaved text included.
@@ -22,7 +22,7 @@ It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 
 ## How it works
 
-Each edit goes to a Web Worker, which converts the Markdown to Typst source, compiles it incrementally, and draws only the pages that changed, visible pages first. The editor never waits for the worker. An edit that arrives while the worker is busy replaces any edit still waiting.
+Each edit goes to a Web Worker, which converts the Markdown to Typst source, compiles it incrementally, and draws only the pages that changed, visible pages first. If the worker is busy, a newer edit replaces any edit still waiting.
 
 There is no server and no account. Documents stay in the browser's IndexedDB and in the files you save.
 
