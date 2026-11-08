@@ -23,7 +23,8 @@ const theme = EditorView.theme({
   '.cm-scroller': { fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', fontSize: '14px', lineHeight: '1.65' },
   '.cm-content': { padding: '28px 32px 40vh', maxWidth: '72ch', caretColor: 'var(--ink)' },
   '.cm-cursor': { borderLeftColor: 'var(--ink)', borderLeftWidth: '2px' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--selection)' },
+  // The browser's own selection, since the editor does not draw one: in the scheme's tint, not the system blue.
+  '.cm-content ::selection, .cm-content::selection': { backgroundColor: 'var(--selection)' },
 });
 
 /** The line a preview click landed on, marked for a moment. Alternating classes restart the fade on a repeat click. */
