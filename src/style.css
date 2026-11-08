@@ -603,11 +603,19 @@ button.remove-logo {
   display: none;
 }
 
-/* Where the editor's cursor renders. Laid over the page, never in the way of a click. */
+/*
+ * Where the editor's cursor renders. Laid over the page, never in the way of a click. Shown only while the editor has
+ * focus, so the page at rest is the page the PDF prints.
+ */
 .cursor-mark {
   position: absolute;
   z-index: 1;
   pointer-events: none;
+  transition: opacity 150ms ease-out;
+}
+
+.split:not(:has(.editor :focus)) .cursor-mark {
+  opacity: 0;
 }
 
 .cursor-line,
