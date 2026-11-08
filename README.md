@@ -4,7 +4,7 @@ A Markdown editor with a live [Typst](https://typst.app) PDF preview. Typst comp
 
 It runs at [liveprint.picone.dev](https://liveprint.picone.dev).
 
-![Typing in liveprint: the typeset pages update on each keystroke with the latency overlay showing about 40 ms, then a click on a heading in the preview moves the editor cursor there, the arrow keys move a highlight through the preview, and a click on the pasted image puts the cursor in its Markdown and lays the highlight over the image](docs/demo.gif)
+![Typing in liveprint: the typeset pages update on each keystroke, then a click on a heading in the preview moves the editor cursor there, the arrow keys move a highlight through the preview, and a click on the pasted image puts the cursor in its Markdown and lays the highlight over the image](docs/demo.gif)
 
 ## Features
 

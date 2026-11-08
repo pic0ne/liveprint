@@ -1,4 +1,4 @@
-// Records docs/demo.gif: typing with the live preview and the latency overlay, pasting an image, then two-way linking in
+// Records docs/demo.gif: typing with the live preview, pasting an image, then two-way linking in
 // both directions, a click on the image included.
 // Headless Chrome screencast against `vite preview` of dist/ (`npm run record:demo` builds it), encoded with ffmpeg.
 import { execFileSync } from 'node:child_process';
@@ -21,7 +21,6 @@ await page.send('Page.addScriptToEvaluateOnNewDocument', {
 await page.send('Page.navigate', { url });
 await until('every page drawn', () => evaluate(`(() => { const c = [...document.querySelectorAll('#pages canvas')]; return c.length > 1 && c.every((x) => x.width > 0); })()`), 600);
 await sleep(800);
-await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { altKey: true, code: 'KeyD' }))`);
 
 const view = `document.querySelector('.cm-content').cmTile.view`;
 /** Viewport point just after the given text in the editor. */
