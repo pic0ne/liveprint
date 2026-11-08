@@ -493,6 +493,10 @@ button.remove-logo {
   background: var(--grip);
 }
 
+.divider:focus-visible::after {
+  display: none;
+}
+
 .divider:hover,
 .divider:active {
   background: var(--divider-active);
