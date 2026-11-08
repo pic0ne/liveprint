@@ -30,8 +30,10 @@
   --on-accent: #ffffff;
   /* The blue pencil: focus rings and the checked segment's line, 3:1 on every grey they sit on, in both schemes. */
   --focus: #2f55d4;
-  /* The proofreader's red, kept for the marks that tie the Markdown to the page and nothing else. */
-  --mark: #d22d2d;
+  /* The proofreader's red, kept for the marks that tie the Markdown to the page and nothing else. 4.5:1 on the margin. */
+  --mark: #ad1f1f;
+  /* The same red on the white page, in both schemes. */
+  --page-mark: #ad1f1f;
   --panel: #ffffff;
   /* A row under the pointer or focus in a panel. The muted text on it keeps 4.5:1 in both schemes. */
   --panel-hover: #eceef1;
@@ -51,7 +53,7 @@
     --divider-active: #30353b;
     --grip: #7b828b;
     --ground: #1b1e22;
-    --rule: #4b525b;
+    --rule: #646b75;
     --ink: #e6e8eb;
     --muted: #99a0a9;
     --link: #93a9f5;
@@ -558,8 +560,9 @@ button.remove-logo {
   background: var(--grip);
 }
 
+/* Out of the way of the margin's mark while the mark is beside it, back under the pointer. */
 .divider:focus-visible::after,
-.split:has(.editor :focus) .divider::after {
+.split:has(.editor :focus) .divider[data-mark-near-grip]:not(:hover)::after {
   display: none;
 }
 
@@ -694,24 +697,24 @@ button.remove-logo {
   position: absolute;
 }
 
-/* A proofreader's underline beneath the line, and a caret under the character. */
+/* A proofreader's underline beneath the line, and a caret standing on it under the character, clear of the next line. */
 .cursor-line {
-  border-bottom: 1px solid var(--mark);
+  border-bottom: 1px solid var(--page-mark);
 }
 
 .cursor-mark[data-kind='image'] .cursor-line {
-  border: 1px solid var(--mark);
+  border: 1px solid var(--page-mark);
 }
 
 .cursor-caret::after {
   content: '';
   position: absolute;
-  left: -5px;
-  bottom: -9px;
-  width: 10px;
-  height: 7px;
-  background: var(--mark);
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 7'%3E%3Cpath d='M1 6.2 5 1.3l4 4.9' fill='none' stroke='black' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat;
+  left: -4px;
+  bottom: 0;
+  width: 8px;
+  height: 5px;
+  background: var(--page-mark);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 5'%3E%3Cpath d='M.8 5 4 .9 7.2 5' fill='none' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat;
 }
 
 /* In the margin, at the cursor's height: a caret over the number of its Markdown line. */

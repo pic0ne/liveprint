@@ -3,6 +3,8 @@ import type { EditorView } from '@codemirror/view';
 const SVG = 'http://www.w3.org/2000/svg';
 /** How far the leader runs level out of the margin and into the page, in px, before and after its slant. */
 const LEVEL = 12;
+/** The mark this close to the margin's middle, in px, would sit on the resize grip. */
+const NEAR_GRIP = 30;
 
 /**
  * The divider as a proofreader's margin: the number of the cursor's line at the cursor's height, and a hairline from
@@ -60,6 +62,7 @@ export class ProofMargin {
     const y = caret && (caret.top + caret.bottom) / 2;
     const shown = y !== null && y >= pane.top && y <= pane.bottom && margin.width > 0;
     this.#mark.hidden = !shown;
+    this.#margin.toggleAttribute('data-mark-near-grip', shown && Math.abs(y - (margin.top + margin.height / 2)) < NEAR_GRIP);
     if (!shown) return this.#leader.setAttribute('d', '');
     this.#mark.style.top = `${y - margin.top}px`;
     this.#number.textContent = String(this.#editor.state.doc.lineAt(head).number);
