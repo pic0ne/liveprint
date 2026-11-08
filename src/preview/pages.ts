@@ -25,6 +25,7 @@ interface PageView {
 export class Pages {
   readonly #scroller: HTMLElement;
   readonly #onView: (view: View) => void;
+  readonly #onMark: () => void;
   readonly #pages: PageView[] = [];
   readonly #mark: HTMLElement;
   #spot: Spot | null = null;
@@ -36,9 +37,11 @@ export class Pages {
   /** Text waiting for its page's layer, by page, while the layers are hidden. */
   readonly #pendingText = new Map<number, TextPage>();
 
-  constructor(scroller: HTMLElement, onView: (view: View) => void) {
+  /** `onMark` runs in each frame that may have moved the cursor's mark, after placing it. */
+  constructor(scroller: HTMLElement, onView: (view: View) => void, onMark: () => void) {
     this.#scroller = scroller;
     this.#onView = onView;
+    this.#onMark = onMark;
     this.#mark = scroller.appendChild(Object.assign(document.createElement('div'), { className: 'cursor-mark', hidden: true }));
     this.#mark.append(
       Object.assign(document.createElement('div'), { className: 'cursor-line' }),
@@ -70,6 +73,11 @@ export class Pages {
   showText(pages: TextPage[]): void {
     for (const page of pages) this.#pendingText.set(page.index, page);
     if (this.#scroller.classList.contains('reading')) this.#fillLayers();
+  }
+
+  /** The mark over the cursor's line, or the image it is in, while the page shows one. */
+  get markedLine(): HTMLElement | null {
+    return this.#mark.hidden ? null : (this.#mark.firstElementChild as HTMLElement);
   }
 
   /** Shows the text layers, for selecting, copying and finding. */
@@ -128,6 +136,7 @@ export class Pages {
       height: `${root.offsetHeight}px`,
     });
     const [band, caret] = this.#mark.children as unknown as [HTMLElement, HTMLElement];
+    this.#mark.dataset.kind = spot.kind;
     caret.hidden = spot.kind === 'image';
     if (spot.kind === 'image') {
       Object.assign(band.style, { left: percent(spot.x), width: percent(spot.w), top: percent(spot.y), height: percent(spot.h) });
@@ -171,6 +180,7 @@ export class Pages {
       if (this.#follow) this.#reveal();
       this.#follow = false;
       this.#placeMark();
+      this.#onMark();
     });
   }
 

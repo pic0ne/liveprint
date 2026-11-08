@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory } 
 import { commonmarkLanguage, markdown } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, keymap, placeholder } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, highlightActiveLine, keymap, placeholder } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { markdownExtensions } from './markdown/parser';
 
@@ -24,6 +24,8 @@ const theme = EditorView.theme({
   '.cm-content': { padding: '28px 32px 40vh', maxWidth: '72ch', caretColor: 'var(--ink)' },
   '.cm-cursor': { borderLeftColor: 'var(--ink)', borderLeftWidth: '2px' },
   '.cm-placeholder': { color: 'var(--muted)' },
+  // Marked by a rule in the gutter instead, from the stylesheet.
+  '.cm-activeLine': { backgroundColor: 'transparent' },
   // The browser's own selection, since the editor does not draw one: in the scheme's tint, not the system blue.
   '.cm-content ::selection, .cm-content::selection': { backgroundColor: 'var(--selection)' },
 });
@@ -95,6 +97,7 @@ export function createEditor(
     theme,
     placeholder('Write Markdown here, or drop a .md file'),
     jumpedLine,
+    highlightActiveLine(),
     // A dropped file is the app's to open or insert, instead of having its text inserted.
     EditorView.domEventHandlers({
       drop: (e) => (e.dataTransfer?.files.length ?? 0) > 0,

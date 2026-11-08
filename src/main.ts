@@ -8,6 +8,7 @@ import { IMAGE_TYPE_NAMES, IMAGE_TYPES, type ImagePath } from './images';
 import { afterNextPaint, LatencyMeter } from './metrics';
 import { registerServiceWorker } from './offline';
 import { Pages } from './preview/pages';
+import { ProofMargin } from './proofMargin';
 import { type FromWorker, firstRev, nextRev, type Rev, type Start, type ToWorker } from './protocol';
 import type { Recent } from './recent';
 import { RecentMenu } from './recentMenu';
@@ -253,7 +254,13 @@ if (custom) {
 send({ kind: 'settings', settings });
 const menu = new SettingsMenu($('settings'), settings, menuActions);
 menu.customFiles(customFiles(custom));
-const pages = new Pages($('pages'), (view) => send({ kind: 'view', ...view }));
+/** Set once the editor exists, which waits for the last document to be read. */
+let proof: ProofMargin | null = null;
+const pages = new Pages(
+  $('pages'),
+  (view) => send({ kind: 'view', ...view }),
+  () => proof?.draw(),
+);
 
 let rev: Rev = firstRev;
 let pdfRequest: Rev | null = null;
@@ -297,9 +304,13 @@ const { view: editor, load } = createEditor(
     meter.input(rev, inputStart ?? performance.now());
     inputStart = null;
   },
-  locateCursor,
+  () => {
+    locateCursor();
+    proof?.schedule();
+  },
   (files) => insertImages(files, null),
 );
+proof = new ProofMargin(editor, divider, $('pages'), () => pages.markedLine);
 // Capture phase on the editor root runs before CodeMirror's own handlers apply the edit.
 editor.dom.addEventListener(
   'keydown',

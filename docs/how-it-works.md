@@ -30,7 +30,7 @@ The preview is one canvas per page rather than SVG. The SVG preview put about 21
 
 ## Two-way linking
 
-Click a word in the preview and the editor cursor moves into that word. Move the cursor and the preview marks the same place with a pale band over the line and a thin bar at the character. If that line is out of sight, the preview scrolls to it, unless you scrolled the preview yourself in the last second.
+Click a word in the preview and the editor cursor moves into that word. Move the cursor and the preview marks the same place as a proofreader would, with a red line under the printed line and a caret under the character. The margin between the panes shows the number of the cursor's Markdown line at the cursor's height, and a thin red line leads from it to the start of the printed line. The marks show only while the editor has focus. If that line is out of sight, the preview scrolls to it, unless you scrolled the preview yourself in the last second.
 
 A Markdown paragraph is usually one long source line, so liveprint links by character, not by line. typst.ts 0.7.0 cannot map a click to the source, so liveprint matches the printed text against the Markdown:
 
@@ -192,7 +192,7 @@ When the Markdown names an image liveprint does not have, the preview shows a da
 
 ### Linking an image
 
-A click on an image puts the cursor inside its Markdown. With the cursor inside `![…](…)`, the preview lays the band over the whole image.
+A click on an image puts the cursor inside its Markdown. With the cursor inside `![…](…)`, the preview draws the mark as a frame around the whole image.
 
 An image prints no text, so the text layer has nothing for it. The converter wraps each image in `linked-image`, which places zero-size marks for the image's corner, its height and its natural size. The worker reads the marks with Typst's `query`, in document order, and pairs them with the images' Markdown, which the converter lists in the same order. The marks hold no offsets, so they add at most 0.5 ms to a compile.
 
