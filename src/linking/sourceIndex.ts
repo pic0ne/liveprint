@@ -1,5 +1,5 @@
 import type { TextPiece } from '../convert/toTypst';
-import { matchPairs } from './diff';
+import { matchRuns } from './diff';
 import { type Edges, evenEdges } from './edges';
 import type { Run } from './runs';
 
@@ -183,7 +183,7 @@ export class SourceIndex {
     const [source, sourceOffset] = units(pieces.filter((p) => !p.aside));
     const offsets = new Int32Array(byChar.length).fill(-1);
     const paired = new Uint8Array(byChar.length);
-    const pairs = matchPairs(rendered, source);
+    const pairs = matchRuns(rendered, source);
     for (let i = 0; i < pairs.length; i += 2) {
       const char = renderedChar[pairs[i]!]!;
       if (paired[char]) continue;
@@ -195,7 +195,7 @@ export class SourceIndex {
     const [aside, asideOffset] = units(pieces.filter((p) => p.aside));
     if (aside.length > 0) {
       const left = rendered.flatMap((_, unit) => (paired[renderedChar[unit]!] ? [] : [unit]));
-      const leftPairs = matchPairs(left.map((unit) => rendered[unit]!), aside);
+      const leftPairs = matchRuns(left.map((unit) => rendered[unit]!), aside);
       for (let i = 0; i < leftPairs.length; i += 2) {
         const char = renderedChar[left[leftPairs[i]!]!]!;
         if (asides[char]! < 0) asides[char] = asideOffset[leftPairs[i + 1]!]!;

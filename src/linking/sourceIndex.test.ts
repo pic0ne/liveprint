@@ -28,6 +28,15 @@ describe('SourceIndex', () => {
     expect(split.sourceAt(0, 0.36, 0.15)).toBe(7);
   });
 
+  test('a letter stays in its word when a line the Markdown lacks has the same letter', () => {
+    // Front matter `author: [aa, Quist]` prints "aa and Quist", then a date the Markdown writes another way.
+    const front = index(
+      [run('aa and Quist', 0, 0), run('October', 0, 20), run('field', 0, 40)],
+      [{ from: 0, text: 'aa' }, { from: 4, text: 'Quist' }, { from: 20, text: 'field' }],
+    );
+    expect(front.spotOf(8)).toEqual(spot(0, 0.55, 0, 0.1, 0, 0.6));
+  });
+
   test('hyphenation across two lines', () => {
     const hyphenated = index([run('type-', 10, 10), run('setting is', 10, 24)], [{ from: 0, text: 'typesetting is' }]);
     expect(hyphenated.spotOf(4)).toEqual(spot(0, 0.1, 0.24, 0.1, 0.1, 0.6));

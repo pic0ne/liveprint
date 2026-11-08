@@ -61,3 +61,37 @@ export function matchPairs(a: Sequence, b: Sequence): number[] {
   align(0, a.length, 0, b.length);
   return out;
 }
+
+/**
+ * `matchPairs(a, b)` without its strays, the runs kept grown over equal neighbours. A longest common subsequence
+ * pairs as many elements as it can, not neighbours with neighbours, so text that one side has and the other lacks can
+ * take a letter that belongs elsewhere: the `i` of a name paired with the `i` of a contents entry further down the
+ * page. A run of consecutive pairs is a stray when it is shorter than the jump on both sides of it: how much further
+ * one sequence moved than the other since the run before, or until the run after. Dropping a stray frees the letters
+ * it took, and the runs beside them take them back.
+ */
+export function matchRuns(a: Sequence, b: Sequence): number[] {
+  const pairs = matchPairs(a, b);
+  const runs: { a: number; b: number; length: number }[] = [];
+  for (let i = 0; i < pairs.length; i += 2) {
+    const last = runs[runs.length - 1];
+    if (last && pairs[i] === last.a + last.length && pairs[i + 1] === last.b + last.length) last.length++;
+    else runs.push({ a: pairs[i]!, b: pairs[i + 1]!, length: 1 });
+  }
+  const end = { a: a.length, b: b.length, length: 0 };
+  const start = { a: 0, b: 0, length: 0 };
+  const jump = (from: { a: number; b: number; length: number }, to: { a: number; b: number }) =>
+    Math.abs(to.a - from.a - from.length - (to.b - from.b - from.length));
+  const kept = runs.filter((run, r) => run.length >= jump(runs[r - 1] ?? start, run) || run.length >= jump(run, runs[r + 1] ?? end));
+  const out: number[] = [];
+  kept.forEach((run, r) => {
+    const next = kept[r + 1] ?? end;
+    let length = run.length;
+    while (run.a + length < next.a && run.b + length < next.b && a[run.a + length] === b[run.b + length]) length++;
+    let back = 0;
+    const previous = out.length > 0 ? { a: out[out.length - 2]! + 1, b: out[out.length - 1]! + 1 } : start;
+    while (run.a - back > previous.a && run.b - back > previous.b && a[run.a - back - 1] === b[run.b - back - 1]) back++;
+    for (let i = -back; i < length; i++) out.push(run.a + i, run.b + i);
+  });
+  return out;
+}
